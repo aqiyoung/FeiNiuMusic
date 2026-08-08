@@ -20,6 +20,15 @@ class JustAudioEngine implements PlayerEngine {
   @override
   EngineKind get kind => EngineKind.justAudio;
 
+  /// 当前播放器的 Android 均衡器（仅 Android / ExoPlayer 可用，其余平台返回 null）。
+  /// 需在已加载音频源后访问；[AudioEffectsService] 据此应用均衡器预设。
+  Future<AndroidEqualizer?> get androidEqualizer => _player.androidEqualizer;
+
+  /// 当前播放器的 Android 响度增强器（仅 Android / ExoPlayer 可用，用于重低音）。
+  /// 需在已加载音频源后访问；非 Android 返回 null（此时回退为 EQ 低段叠加）。
+  Future<AndroidLoudnessEnhancer?> get androidLoudnessEnhancer =>
+      _player.androidLoudnessEnhancer;
+
   @override
   Future<void> init() async {
     // ExoPlayer 无需额外初始化；原生流由 PlayerService 订阅本引擎的转发流。

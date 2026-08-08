@@ -14,6 +14,7 @@ import '../../pages/settings/lyrics_settings_page.dart';
 import '../../pages/settings/notification_settings_page.dart';
 import '../../pages/settings/permission_settings_page.dart';
 import '../../pages/settings/app_appearance_settings_page.dart';
+import '../../pages/settings/audio_effects_settings_page.dart';
 import '../../pages/settings/player_controls_settings_page.dart';
 import '../../pages/settings/player_appearance_settings_page.dart';
 import '../../pages/settings/cache_settings_page.dart';
@@ -46,6 +47,7 @@ class AppRoutes {
   static const lyrics = '/player/lyrics';
   static const settings = '/settings';
   static const appAppearanceSettings = '/settings/app-appearance';
+  static const audioEffectsSettings = '/settings/audio-effects';
   static const gradientSettings = '/settings/gradient';
   static const lyricsSettings = '/settings/lyrics';
   static const notificationSettings = '/settings/notifications';
@@ -87,6 +89,7 @@ class AppRouter {
     AppRoutes.lyrics: (_) => LyricPage(),
     AppRoutes.settings: (_) => const SettingsPage(),
     AppRoutes.appAppearanceSettings: (_) => const AppAppearanceSettingsPage(),
+    AppRoutes.audioEffectsSettings: (_) => const AudioEffectsSettingsPage(),
     AppRoutes.gradientSettings: (_) => const GradientSettingsPage(),
     AppRoutes.lyricsSettings: (_) => const LyricsSettingsPage(),
     AppRoutes.notificationSettings: (_) => const NotificationSettingsPage(),

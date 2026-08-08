@@ -119,6 +119,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   AppSettingTile(
+                    title: '音效',
+                    subtitle: '均衡器预设与重低音增强',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.audioEffectsSettings,
+                    ),
+                  ),
+                  AppSettingTile(
                     title: '通知设置',
                     subtitle: '媒体通知显示与按钮偏好',
                     trailing: const Icon(Icons.chevron_right_rounded),

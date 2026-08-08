@@ -24,6 +24,7 @@ import 'player/media_kit_engine.dart';
 import 'player/playback_router.dart';
 import 'player/player_engine.dart';
 import 'stats_service.dart';
+import 'audio_effects_service.dart';
 import 'volume_schedule_service.dart';
 import '../state/settings_state.dart';
 import '../state/song_state.dart';
@@ -632,6 +633,11 @@ class PlayerService with WidgetsBindingObserver {
     // 期间播放器已切到新歌加载态、无旧音，play() 打在正确引擎上。
     _activeEngine = target;
     _activeRunStart = bounds.start;
+    // 音效：记录当前活跃且支持音效的引擎（仅 just_audio）。media_kit 一路
+    // 暂不支持均衡器/响度增强，置 null 由 AudioEffectsService 静默跳过。
+    AudioEffectsService.instance.setActiveEngine(
+      target is JustAudioEngine ? target : null,
+    );
     // 同步当前解码引擎（UI"更多面板"标签）。
     _state.decoderEngine.value = target.kind;
     // 首次激活该引擎时订阅其流（_wireEngine 幂等）。
@@ -706,6 +712,11 @@ class PlayerService with WidgetsBindingObserver {
     );
     await _applyEngineVolume(target);
     await _applyEngineSpeed(target);
+    // 音效：把均衡器预设 / 重低音开关应用到刚加载的 just_audio 引擎。
+    // media_kit 引擎时 _activeEngine 为 null，applyCurrent 内部静默跳过。
+    if (target is JustAudioEngine) {
+      unawaited(AudioEffectsService.instance.applyCurrent());
+    }
   }
 
   /// 按引擎类型返回引擎实例（media_kit 懒创建）。
