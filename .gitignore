@@ -58,6 +58,7 @@ local.properties
 key.properties
 **/*.keystore
 **/*.jks
+**/*.p12
 /android/build/
 
 /android/app/debug

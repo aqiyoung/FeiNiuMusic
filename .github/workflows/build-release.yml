@@ -27,7 +27,7 @@ jobs:
           java-version: "17"
 
       # 签名密钥（可选）：
-      # 若仓库配置了 ANDROID_KEYSTORE_BASE64 等 secret，则解码出 release.keystore
+      # 若仓库配置了 ANDROID_KEYSTORE_BASE64 等 secret，则解码出 release.p12 (PKCS12)
       # 并把 SIGNING_* 注入后续步骤环境，产出「正式签名」包（可上架 / 覆盖升级）。
       # 若未配置，则脚本自动跳过 —— build.gradle 会回退到 debug 签名，
       # 产出可直接安装测试的 APK（不能上架，也不能覆盖正式签名安装）。
@@ -40,9 +40,9 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.p12
             {
-              echo "SIGNING_STORE_FILE=release.keystore"
+              echo "SIGNING_STORE_FILE=release.p12"
               echo "SIGNING_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
               echo "SIGNING_KEY_ALIAS=$ANDROID_KEY_ALIAS"
               echo "SIGNING_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"

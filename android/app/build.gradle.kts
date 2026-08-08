@@ -98,6 +98,8 @@ android {
                 storePassword = storePasswordValue
                 keyAlias = keyAliasValue
                 keyPassword = keyPasswordValue
+                // 我们的签名密钥以 PKCS12 格式提供（沙箱无 keytool，由 Python 生成）。
+                storeType = "PKCS12"
             }
         }
     }
