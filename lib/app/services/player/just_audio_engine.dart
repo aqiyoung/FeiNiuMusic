@@ -14,28 +14,26 @@ import 'player_engine.dart';
 /// 的 Dart 本地代理（代理不解析 `#EXT-X-MAP`，且会用 Dart HttpClient 连 NAS
 /// IPv6 导致不可达）。
 class JustAudioEngine implements PlayerEngine {
-  JustAudioEngine() {
-    // just_audio 0.10.x：Android 音效（均衡器 / 响度增强）需通过 AudioPipeline 挂载，
-    // 而非旧版的 player.androidEqualizer getter。仅 Android 平台创建实例，其余平台
-    // 留 null（音效是增强项，不支持时静默跳过即可）。
-    if (Platform.isAndroid) {
-      _equalizer = AndroidEqualizer();
-      _loudness = AndroidLoudnessEnhancer();
-    }
-    _player = AudioPlayer(
-      useProxyForRequestHeaders: false,
-      audioPipeline: AudioPipeline(
-        androidAudioEffects: [
-          if (_equalizer != null) _equalizer!,
-          if (_loudness != null) _loudness!,
-        ],
-      ),
-    );
-  }
+  // just_audio 0.10.x：Android 音效（均衡器 / 响度增强）需通过 AudioPipeline 挂载，
+  // 而非旧版的 player.androidEqualizer getter。仅 Android 平台创建实例，其余平台
+  // 留 null（音效是增强项，不支持时静默跳过即可）。
+  // 字段按声明顺序初始化，保证 _equalizer / _loudness 先于 _player 就绪，
+  // 供 AudioPipeline 引用同一实例（getter 才能返回已挂载的活对象）。
+  final AndroidEqualizer? _equalizer =
+      Platform.isAndroid ? AndroidEqualizer() : null;
+  final AndroidLoudnessEnhancer? _loudness =
+      Platform.isAndroid ? AndroidLoudnessEnhancer() : null;
+  final AudioPlayer _player = AudioPlayer(
+    useProxyForRequestHeaders: false,
+    audioPipeline: AudioPipeline(
+      androidAudioEffects: [
+        if (_equalizer != null) _equalizer!,
+        if (_loudness != null) _loudness!,
+      ],
+    ),
+  );
 
-  final AudioPlayer _player;
-  final AndroidEqualizer? _equalizer;
-  final AndroidLoudnessEnhancer? _loudness;
+  JustAudioEngine();
 
   @override
   EngineKind get kind => EngineKind.justAudio;
