@@ -17,23 +17,27 @@ class JustAudioEngine implements PlayerEngine {
   // just_audio 0.10.x：Android 音效（均衡器 / 响度增强）需通过 AudioPipeline 挂载，
   // 而非旧版的 player.androidEqualizer getter。仅 Android 平台创建实例，其余平台
   // 留 null（音效是增强项，不支持时静默跳过即可）。
-  // 字段按声明顺序初始化，保证 _equalizer / _loudness 先于 _player 就绪，
-  // 供 AudioPipeline 引用同一实例（getter 才能返回已挂载的活对象）。
-  final AndroidEqualizer? _equalizer =
-      Platform.isAndroid ? AndroidEqualizer() : null;
-  final AndroidLoudnessEnhancer? _loudness =
-      Platform.isAndroid ? AndroidLoudnessEnhancer() : null;
-  final AudioPlayer _player = AudioPlayer(
-    useProxyForRequestHeaders: false,
-    audioPipeline: AudioPipeline(
-      androidAudioEffects: [
-        if (_equalizer != null) _equalizer!,
-        if (_loudness != null) _loudness!,
-      ],
-    ),
-  );
+  // 注意：Dart 不允许在 field initializer 里访问 this（即不能引用其它实例字段），
+  // 故在构造函数体内创建并挂载，保证 getter 返回与 AudioPipeline 同一个实例。
+  AndroidEqualizer? _equalizer;
+  AndroidLoudnessEnhancer? _loudness;
+  late final AudioPlayer _player;
 
-  JustAudioEngine();
+  JustAudioEngine() {
+    if (Platform.isAndroid) {
+      _equalizer = AndroidEqualizer();
+      _loudness = AndroidLoudnessEnhancer();
+    }
+    _player = AudioPlayer(
+      useProxyForRequestHeaders: false,
+      audioPipeline: AudioPipeline(
+        androidAudioEffects: [
+          if (_equalizer != null) _equalizer!,
+          if (_loudness != null) _loudness!,
+        ],
+      ),
+    );
+  }
 
   @override
   EngineKind get kind => EngineKind.justAudio;
