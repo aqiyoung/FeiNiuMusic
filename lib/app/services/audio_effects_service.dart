@@ -45,30 +45,34 @@ class AudioEffectsService {
       );
       final bass = AudioEffectsSettings.bassBoost.value;
 
-      final eq = await engine.androidEqualizer;
+      final eq = engine.androidEqualizer;
       if (eq != null) {
-        final bands = eq.bands;
+        final params = await eq.parameters;
+        final bands = params.bands;
+        // 应用均衡器预设到所有频段。
         for (var i = 0; i < bands.length; i++) {
           final gain = preset.gainFor(i, bands.length);
           await bands[i].setGain(gain);
         }
+        await eq.setEnabled(true);
+
+        // 重低音：额外给最低 3 段叠加低音增益（EQ 低段 + LoudnessEnhancer 双保险）。
+        if (bass) {
+          for (var i = 0; i < bands.length && i < 3; i++) {
+            final base = preset.gainFor(i, bands.length);
+            final g = (base + _bassEqBoost).clamp(
+              params.minDecibels,
+              params.maxDecibels,
+            );
+            await bands[i].setGain(g);
+          }
+        }
       }
 
-      final loud = await engine.androidLoudnessEnhancer;
+      final loud = engine.androidLoudnessEnhancer;
       if (loud != null) {
+        await loud.setTargetGain(bass ? _bassTargetGain : 0.0);
         await loud.setEnabled(bass);
-        if (bass) await loud.setTargetGain(_bassTargetGain);
-      } else if (bass && eq != null) {
-        // 设备无 LoudnessEnhancer（iOS / 桌面）时，回退为给最低 3 段叠加低音。
-        final bands = eq.bands;
-        for (var i = 0; i < bands.length && i < 3; i++) {
-          final base = preset.gainFor(i, bands.length);
-          final g = (base + _bassEqBoost).clamp(
-            bands[i].minGain,
-            bands[i].maxGain,
-          );
-          await bands[i].setGain(g);
-        }
       }
     } catch (e) {
       if (kDebugMode) {

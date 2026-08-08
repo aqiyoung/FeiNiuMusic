@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:just_audio/just_audio.dart';
 
@@ -13,21 +14,38 @@ import 'player_engine.dart';
 /// 的 Dart 本地代理（代理不解析 `#EXT-X-MAP`，且会用 Dart HttpClient 连 NAS
 /// IPv6 导致不可达）。
 class JustAudioEngine implements PlayerEngine {
-  JustAudioEngine() : _player = AudioPlayer(useProxyForRequestHeaders: false);
+  JustAudioEngine() {
+    // just_audio 0.10.x：Android 音效（均衡器 / 响度增强）需通过 AudioPipeline 挂载，
+    // 而非旧版的 player.androidEqualizer getter。仅 Android 平台创建实例，其余平台
+    // 留 null（音效是增强项，不支持时静默跳过即可）。
+    if (Platform.isAndroid) {
+      _equalizer = AndroidEqualizer();
+      _loudness = AndroidLoudnessEnhancer();
+    }
+    _player = AudioPlayer(
+      useProxyForRequestHeaders: false,
+      audioPipeline: AudioPipeline(
+        androidAudioEffects: [
+          if (_equalizer != null) _equalizer!,
+          if (_loudness != null) _loudness!,
+        ],
+      ),
+    );
+  }
 
   final AudioPlayer _player;
+  final AndroidEqualizer? _equalizer;
+  final AndroidLoudnessEnhancer? _loudness;
 
   @override
   EngineKind get kind => EngineKind.justAudio;
 
-  /// 当前播放器的 Android 均衡器（仅 Android / ExoPlayer 可用，其余平台返回 null）。
-  /// 需在已加载音频源后访问；[AudioEffectsService] 据此应用均衡器预设。
-  Future<AndroidEqualizer?> get androidEqualizer => _player.androidEqualizer;
+  /// 当前播放器的 Android 均衡器实例（仅 Android 平台非 null）。
+  /// 通过 [AudioPipeline] 挂载；[AudioEffectsService] 据此应用均衡器预设。
+  AndroidEqualizer? get androidEqualizer => _equalizer;
 
-  /// 当前播放器的 Android 响度增强器（仅 Android / ExoPlayer 可用，用于重低音）。
-  /// 需在已加载音频源后访问；非 Android 返回 null（此时回退为 EQ 低段叠加）。
-  Future<AndroidLoudnessEnhancer?> get androidLoudnessEnhancer =>
-      _player.androidLoudnessEnhancer;
+  /// 当前播放器的 Android 响度增强器实例（仅 Android 平台非 null，用于重低音）。
+  AndroidLoudnessEnhancer? get androidLoudnessEnhancer => _loudness;
 
   @override
   Future<void> init() async {
