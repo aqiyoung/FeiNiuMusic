@@ -103,6 +103,10 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
       toolbarHeight: resolvedHeight,
       bottom: bottom,
       systemOverlayStyle: overlayStyle,
+      // 标题与 leading / actions 的水平间距，避免文字/图标贴边
+      titleSpacing: miuix ? 16 : 8,
+      // actions 右侧安全边距（状态栏区域 + 全面屏手势）
+      actionsPadding: const EdgeInsets.only(right: 4),
     );
   }
 }
