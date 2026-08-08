@@ -55,8 +55,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
                 for (final preset in AudioEffectsSettings.presets)
                   AppSettingTile(
                     title: preset.name,
-                    subtitle:
-                        preset.id == 'off' ? '原始声音' : '${preset.name}音效曲线',
+                    subtitle: preset.id == 'off' ? '原始声音' : '音效曲线',
                     trailing: currentId == preset.id
                         ? const Icon(Icons.check_rounded, size: 20)
                         : null,

@@ -48,6 +48,10 @@ class AudioEffectsSettings {
     EqualizerPreset('dance', '舞曲', [4, 4, 2, 0, 0, -1, -2, -2, 0, 2]),
     EqualizerPreset('bass', '重低音', [7, 6, 4, 2, 0, -1, -2, -3, -3, -3]),
     EqualizerPreset('bright', '明亮', [-3, -3, -2, -1, 0, 1, 3, 5, 6, 7]),
+    // Mi Sound：模拟小米音效听感（低频弹性 + 中频人声突出 + 高频微亮）。
+    // 注意：真正的 Mi Sound 是小米 ROM 系统级音效引擎，第三方 App 无法直接挂载，
+    // 这里用 EQ 曲线近似其听感，跨设备（含非小米）都可用。
+    EqualizerPreset('misound', 'Mi Sound', [4, 3, 1, 1, 2, 2, 1, 2, 3, 2]),
   ];
 
   /// 按 id 取预设；未知 id 回落到关闭（首项）。
