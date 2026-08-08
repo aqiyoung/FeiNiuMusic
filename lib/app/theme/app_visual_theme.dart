@@ -59,6 +59,12 @@ ThemeData buildMiuixMaterialTheme(
     primaryColor: scheme.primary,
     scaffoldBackgroundColor: background,
     canvasColor: background,
+    // 视觉质感升级：给整套主题一个统一的柔和投影色，让 dialog/sheet/popup
+    // 等浮层从「扁平贴片」变成有浮起体积感的面板（深色下用纯黑、浅色下取
+    // primary 低透明度，避免生硬黑影）。各浮层再各自设 elevation 才会生效。
+    shadowColor: isDark
+        ? Colors.black.withValues(alpha: 0.30)
+        : scheme.primary.withValues(alpha: 0.12),
     cardColor: surface,
     splashFactory: InkRipple.splashFactory,
     // TV 模式：给所有 Material 可聚焦控件（InkWell/ListTile/IconButton 等）
@@ -111,15 +117,21 @@ ThemeData buildMiuixMaterialTheme(
     dialogTheme: DialogThemeData(
       backgroundColor: surface,
       surfaceTintColor: Colors.transparent,
-      elevation: 0,
+      elevation: 3,
+      shadowColor: isDark
+          ? Colors.black.withValues(alpha: 0.40)
+          : scheme.primary.withValues(alpha: 0.14),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: surface,
       modalBackgroundColor: surface,
       surfaceTintColor: Colors.transparent,
-      elevation: 0,
-      modalElevation: 0,
+      elevation: 3,
+      modalElevation: 3,
+      shadowColor: isDark
+          ? Colors.black.withValues(alpha: 0.40)
+          : scheme.primary.withValues(alpha: 0.14),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
       ),
@@ -223,8 +235,53 @@ ThemeData buildMiuixMaterialTheme(
       color: surface,
       surfaceTintColor: Colors.transparent,
       elevation: 4,
+      shadowColor: isDark
+          ? Colors.black.withValues(alpha: 0.40)
+          : scheme.primary.withValues(alpha: 0.14),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     ),
+  );
+}
+
+/// 玻璃质感装饰：在 Miuix 圆角表面叠加「顶边高光(rim) + 细发丝描边 + 柔和外阴影」，
+/// 把扁平磨砂升级为有体积感的液体玻璃(liquid-glass)。用于迷你播放条、底部导航
+/// 等常驻玻璃面。TV 端 isTv=true 时调用方应去掉阴影（10-foot 距离靠高对比而非投影）。
+///
+/// - [isBlurred] 为 true 时顶边高光更亮，呈现玻璃边缘受光的液体感；
+/// - [borderRadius] 与所在容器的裁剪半径保持一致（导航栏用 0 即直角）；
+/// - [shadowOffset] 默认向下，底部导航栏传 `Offset(0, -2)` 改为向上投影。
+BoxDecoration miuixGlassDecoration({
+  required ColorScheme scheme,
+  required bool isDark,
+  required double borderRadius,
+  required bool isBlurred,
+  Offset shadowOffset = const Offset(0, 6),
+}) {
+  final topRim = isBlurred
+      ? (isDark
+          ? Colors.white.withValues(alpha: 0.22)
+          : Colors.white.withValues(alpha: 0.7))
+      : (isDark
+          ? Colors.white.withValues(alpha: 0.12)
+          : Colors.white.withValues(alpha: 0.5));
+  final hairline = isDark
+      ? Colors.white.withValues(alpha: 0.08)
+      : scheme.outlineVariant.withValues(alpha: 0.42);
+  return BoxDecoration(
+    borderRadius: BorderRadius.circular(borderRadius),
+    border: Border(
+      top: BorderSide(color: topRim, width: 1.0),
+      left: BorderSide(color: hairline, width: 0.8),
+      right: BorderSide(color: hairline, width: 0.8),
+      bottom: BorderSide(color: hairline, width: 0.8),
+    ),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.08),
+        blurRadius: 14,
+        offset: shadowOffset,
+      ),
+    ],
   );
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/router/app_router.dart';
 import '../../app/state/settings_state.dart';
+import '../../app/theme/app_visual_theme.dart';
 
 const _primaryNavigationRoutes = <String>[
   AppRoutes.home,
@@ -162,7 +163,19 @@ class ModernNavigationBar extends StatelessWidget {
             ),
           );
         }
-        return navBar;
+        // 玻璃质感升级：常驻底栏叠加密集「顶边高光(rim) + 柔和外阴影」。
+        // 开启模糊时顶边更亮（液体玻璃受光）；未开启时也保留 1px 顶部分隔线 +
+        // 向上投影，避免与大片内容区糊在一起。
+        return Container(
+          decoration: miuixGlassDecoration(
+            scheme: scheme,
+            isDark: isDark,
+            borderRadius: 0,
+            isBlurred: isBlurred,
+            shadowOffset: const Offset(0, -2),
+          ),
+          child: navBar,
+        );
           },
         );
       },

@@ -87,11 +87,33 @@ class MiniPlayerBar extends StatelessWidget {
                   : Colors.white.withValues(alpha: 0.08))
             : scheme.surface.withValues(alpha: 0.85);
 
-        final border = Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : scheme.outlineVariant.withValues(alpha: 0.42),
-          width: 0.8,
+        // 玻璃质感升级：把均匀描边改为「顶边高光(rim) + 细发丝描边」，让迷你
+        // 播放条在开/关模糊时都呈现液体玻璃的受光边缘，而非扁平磨砂框。
+        final border = Border(
+          top: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.16)
+                : Colors.white.withValues(alpha: 0.5),
+            width: 1.0,
+          ),
+          left: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : scheme.outlineVariant.withValues(alpha: 0.42),
+            width: 0.8,
+          ),
+          right: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : scheme.outlineVariant.withValues(alpha: 0.42),
+            width: 0.8,
+          ),
+          bottom: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : scheme.outlineVariant.withValues(alpha: 0.42),
+            width: 0.8,
+          ),
         );
 
         final defaultShadow = [
