@@ -103,8 +103,8 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
       toolbarHeight: resolvedHeight,
       bottom: bottom,
       systemOverlayStyle: overlayStyle,
-      // 标题与 leading 的水平间距（miuix 下加大，避免"首页"贴紧菜单图标）
-      titleSpacing: miuix ? 24 : 12,
+      // 标题与 leading（菜单图标）的水平间距：用户要求"首页"紧贴三个横，故 miuix 下取极小值
+      titleSpacing: miuix ? 4 : 4,
       // actions 右侧安全边距（miuix 下加大，避免搜索图标贴屏幕右缘）
       actionsPadding: EdgeInsets.symmetric(horizontal: miuix ? 16 : 8),
     );
