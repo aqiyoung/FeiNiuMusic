@@ -550,7 +550,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
             ),
           ),
           Icon(
-            play_circle_outline_rounded,
+            Icons.play_circle_outline_rounded,
             size: 28,
             color: theme.colorScheme.primary.withOpacity(0.6),
           ),
