@@ -67,11 +67,14 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
     }
   }
 
-  /// 打开 Mi Sound 系统音效设置（MIUI/HyperOS → 声音与振动 → 音质音效）。
+  /// 打开 Mi Sound 音质音效（MIUI/HyperOS → 声音与振动 → **音质音效**）。
+  ///
+  /// 通过 ComponentName 精确指向 MIUI 音质音效 Activity，
+  /// 直接到达「音质音效」页面，不停留在上一级「声音与振动」。
   Future<void> _openMiSoundSettings() async {
     if (!Platform.isAndroid) return;
     try {
-      await _systemSettings.invokeMethod<bool>('openSoundSettings');
+      await _systemSettings.invokeMethod<bool>('openMiSoundQuality');
     } catch (_) {
       // 静默失败
     }

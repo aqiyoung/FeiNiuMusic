@@ -342,8 +342,7 @@ class MainActivity : AudioServiceActivity() {
         }
 
         // 系统设置跳转通道：直接发真实的 Android 系统 Intent（系统均衡器 / 声音设置），
-        // 不依赖任何第三方包。对应 Android 官方 AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL，
-        // 与 Spotify / Google Play Music 的实现方式一致。
+        // 不依赖任何第三方包。
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             systemSettingsChannelName
@@ -351,23 +350,67 @@ class MainActivity : AudioServiceActivity() {
             when (call.method) {
                 "openSystemEqualizer" -> {
                     try {
-                        val intent = Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL")
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        // Android 官方标准音频效果控制面板（Spotify / Google Play Music 同款）。
+                        // 必须传 EXTRA_PACKAGE_NAME + EXTRA_CONTENT_TYPE，否则大部分 OEM 不响应。
+                        val intent = Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL").apply {
+                            putExtra("android.media.extra.PACKAGE_NAME", packageName)
+                            putExtra("android.media.extra.CONTENT_TYPE", 0) // MUSIC
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
                         startActivity(intent)
                         result.success(true)
                     } catch (_: Throwable) {
-                        result.success(false)
+                        // 回退：尝试打开系统 EQ 设置页（部分 OEM 支持）
+                        try {
+                            val fallback = Intent("android.media.action.EQUALIZER").apply {
+                                putExtra("android.media.extra.PACKAGE_NAME", packageName)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(fallback)
+                            result.success(true)
+                        } catch (_: Throwable) {
+                            result.success(false)
+                        }
                     }
                 }
-                "openSoundSettings" -> {
+                "openMiSoundQuality" -> {
+                    // 小米 HyperOS/MIUI：直接跳转到「声音与振动 → 音质音效」页面。
+                    // 使用 ComponentName 精确指向 MIUI 音质音效 Activity，
+                    // 避免 ACTION_SOUND_SETTINGS 只停在上一级「声音与振动」。
+                    var ok = false
+                    // 方案 1：MIUI/HyperOS 专用音质音效 Activity
                     try {
-                        val intent = Intent(Settings.ACTION_SOUND_SETTINGS)
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        val intent = Intent().apply {
+                            component = ComponentName(
+                                "com.android.settings",
+                                "com.android.settings.Settings\$SoundQualitySettingsActivity"
+                            )
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
                         startActivity(intent)
-                        result.success(true)
-                    } catch (_: Throwable) {
-                        result.success(false)
+                        ok = true
+                    } catch (_: Throwable) {}
+                    // 方案 2：部分 HyperOS 版本用不同类名
+                    if (!ok) {
+                        try {
+                            val intent = Intent("miui.settings.SOUND_QUALITY").apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            ok = true
+                        } catch (_: Throwable) {}
                     }
+                    // 方案 3：回退到通用声音设置（非小米设备）
+                    if (!ok) {
+                        try {
+                            val intent = Intent(Settings.ACTION_SOUND_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            ok = true
+                        } catch (_: Throwable) {}
+                    }
+                    result.success(ok)
                 }
                 else -> result.notImplemented()
             }
