@@ -58,34 +58,38 @@ class SongEntity {
     }
   }
 
-  /// 音质标识（如 FLAC / 320K / 无损 / DSD），供歌曲列表项展示。
+  /// 音质等级（供 UI 渲染不同颜色）。
   ///
-  /// 优先级：无损格式（flac/alac/wav/dsd…）直接显示格式名；否则按码率估算
-  /// （≥900kbps 视为「无损」，其余显示「{k}K」）。无音质数据返回 null（不显示）。
-  String? get qualityLabel {
+  /// - `sq`：无损格式（FLAC/ALAC/WAV/APE 等）
+  /// - `hr`：高解析度（DSD/DSF/DFF 或码率 ≥ 900kbps）
+  /// - `normal`：有损压缩（显示具体码率如 320K）
+  /// - `null`：无音质数据
+  String? get qualityLevel {
     final raw = (format ?? codec ?? '').trim().toLowerCase();
     const lossless = {
-      'flac',
-      'alac',
-      'wav',
-      'ape',
-      'tta',
-      'wv',
-      'dsd',
-      'dsf',
-      'dff',
-      'truehd',
-      'mlp',
+      'flac', 'alac', 'wav', 'ape', 'tta', 'wv',
+      'truehd', 'mlp',
     };
-    if (raw.isNotEmpty && lossless.contains(raw)) {
-      if (raw == 'dsf' || raw == 'dff') return 'DSD';
-      return raw.toUpperCase(); // FLAC / ALAC / WAV ...
+    if (raw.isNotEmpty && lossless.contains(raw)) return 'sq';
+    if (raw == 'dsf' || raw == 'dff' || raw == 'dsd') return 'hr';
+    if (bitrate != null && bitrate! > 0) {
+      return (bitrate! / 1000).round() >= 900 ? 'hr' : 'normal';
     }
+    if (raw.isNotEmpty) return 'sq'; // 未知无损格式归为 SQ
+    return null;
+  }
+
+  /// 音质标识文字（SQ / HR / 320K 等），供歌曲列表项展示。
+  String? get qualityLabel {
+    final level = qualityLevel;
+    if (level == null) return null;
+    if (level == 'sq') return 'SQ';
+    if (level == 'hr') return 'HR';
+    // normal: 显示码率
     if (bitrate != null && bitrate! > 0) {
       final k = (bitrate! / 1000).round();
-      return k >= 900 ? '无损' : '${k}K';
+      return '${k}K';
     }
-    if (raw.isNotEmpty) return raw.toUpperCase();
     return null;
   }
 

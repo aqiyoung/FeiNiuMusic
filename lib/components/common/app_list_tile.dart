@@ -7,6 +7,7 @@ class AppListTile extends StatelessWidget {
   final String? title;
   final Widget? titleWidget;
   final String? subtitle;
+  final Widget? subtitleWidget;
   final Color? titleColor;
   final Color? subtitleColor;
   final Widget? trailing;
@@ -22,6 +23,7 @@ class AppListTile extends StatelessWidget {
     this.title,
     this.titleWidget,
     this.subtitle,
+    this.subtitleWidget,
     this.titleColor,
     this.subtitleColor,
     this.trailing,
@@ -65,17 +67,18 @@ class AppListTile extends StatelessWidget {
                     ),
                   )
                 : null),
-        subtitle: subtitle != null
-            ? Text(
-                subtitle!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: subtitleColor ?? defaultSubtitleColor,
-                  fontSize: 12,
-                ),
-              )
-            : null,
+        subtitle: subtitleWidget ??
+            (subtitle != null
+                ? Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: subtitleColor ?? defaultSubtitleColor,
+                      fontSize: 12,
+                    ),
+                  )
+                : null),
         trailing: trailing,
         onTap: onTap,
         onLongPress: onLongPress,

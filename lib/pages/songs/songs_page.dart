@@ -684,6 +684,7 @@ class _SongListTile extends StatelessWidget {
       borderRadius: 8,
     );
     final qualityTag = song.qualityLabel;
+    final qualityLevel = song.qualityLevel;
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -721,40 +722,15 @@ class _SongListTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    song.artistDisplayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                  _buildSubtitleWithQualityBadge(
+                    context,
+                    theme,
+                    qualityTag,
+                    qualityLevel,
                   ),
                 ],
               ),
             ),
-            if (qualityTag != null)
-              Container(
-                margin: const EdgeInsets.only(left: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: theme.colorScheme.primary.withOpacity(0.6),
-                    width: 0.8,
-                  ),
-                ),
-                child: Text(
-                  qualityTag,
-                  style: TextStyle(
-                    fontSize: 9,
-                    height: 1.1,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.primary,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
             if (isPlaying)
               Container(
                 margin: const EdgeInsets.only(left: 4),
@@ -766,6 +742,78 @@ class _SongListTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  /// 副标题行：歌手名 + 音质标签(SQ/HR/320K) 内联显示。
+  Widget _buildSubtitleWithQualityBadge(
+    BuildContext context,
+    ThemeData theme,
+    String? qualityTag,
+    String? qualityLevel,
+  ) {
+    final subtitleStyle = TextStyle(
+      fontSize: 12,
+      color: isCurrent
+          ? theme.colorScheme.primary
+          : theme.colorScheme.onSurfaceVariant,
+    );
+
+    if (qualityTag == null) {
+      return Text(
+        song.artistDisplayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: subtitleStyle,
+      );
+    }
+
+    // 按音质等级选颜色：SQ=青绿, HR=橙金, 普通=灰
+    Color badgeColor;
+    switch (qualityLevel) {
+      case 'sq':
+        badgeColor = const Color(0xFF00A86B); // SQ 青绿
+        break;
+      case 'hr':
+        badgeColor = const Color(0xFFFF6B35); // HR 橙金
+        break;
+      default:
+        badgeColor = theme.colorScheme.onSurfaceVariant.withOpacity(0.7);
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            song.artistDisplayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: subtitleStyle,
+          ),
+        ),
+        if (qualityTag != null) ...[
+          Container(
+            margin: const EdgeInsets.only(left: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 0.5),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(color: badgeColor.withOpacity(0.7), width: 0.7),
+            ),
+            constraints: const BoxConstraints(minWidth: 22),
+            child: Text(
+              qualityTag,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 9.5,
+                height: 1.3,
+                fontWeight: FontWeight.w800,
+                color: badgeColor,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

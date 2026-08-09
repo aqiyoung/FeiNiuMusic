@@ -1368,6 +1368,70 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                   ? Colors.white70
                   : const Color.fromARGB(255, 100, 100, 100));
 
+        final qualityTag = song.qualityLabel;
+        final qualityLevel = song.qualityLevel;
+
+        // 按音质等级选颜色：SQ=青绿, HR=橙金, 普通=灰
+        Color? badgeColor;
+        if (qualityLevel != null) {
+          switch (qualityLevel) {
+            case 'sq':
+              badgeColor = const Color(0xFF00A86B);
+              break;
+            case 'hr':
+              badgeColor = const Color(0xFFFF6B35);
+              break;
+            default:
+              badgeColor = subtitleColor.withOpacity(0.7);
+          }
+        }
+
+        Widget subtitleWidget;
+        if (qualityTag != null && badgeColor != null) {
+          subtitleWidget = Row(
+            children: [
+              Expanded(
+                child: Text(
+                  song.artistDisplayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: subtitleColor,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.only(left: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 0.5),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(color: badgeColor.withOpacity(0.7), width: 0.7),
+                ),
+                constraints: const BoxConstraints(minWidth: 22),
+                child: Text(
+                  qualityTag,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    height: 1.3,
+                    fontWeight: FontWeight.w800,
+                    color: badgeColor,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          );
+        } else {
+          subtitleWidget = Text(
+            song.artistDisplayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: subtitleColor, fontSize: 12),
+          );
+        }
+
         final tile = AppListTile(
           leading: SizedBox(
             width: 48,
@@ -1386,31 +1450,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                 : _coverOrIndex(context, song, index, subtitleColor),
           ),
           title: song.title,
-          subtitle: song.artistDisplayName,
+          subtitleWidget: subtitleWidget,
           titleColor: titleColor,
-          trailing: song.qualityLabel != null
-              ? Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: theme.colorScheme.primary.withOpacity(0.6),
-                      width: 0.8,
-                    ),
-                  ),
-                  child: Text(
-                    song.qualityLabel!,
-                    style: TextStyle(
-                      fontSize: 9,
-                      height: 1.1,
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.primary,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                )
-              : null,
           onTap: () async {
             if (_multiSelect.value) {
               final next = _selectedIds.value.toSet();
