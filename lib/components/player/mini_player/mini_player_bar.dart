@@ -87,33 +87,24 @@ class MiniPlayerBar extends StatelessWidget {
                   : Colors.white.withValues(alpha: 0.08))
             : scheme.surface.withValues(alpha: 0.85);
 
-        // 玻璃质感升级：把均匀描边改为「顶边高光(rim) + 细发丝描边」，让迷你
-        // 播放条在开/关模糊时都呈现液体玻璃的受光边缘，而非扁平磨砂框。
+        // 玻璃质感：统一为「顶边高光 + 四周极细受光描边」。
+        // 旧实现左/右/下用 scheme.outlineVariant(0.42)，在浅色主题下呈现为
+        // 明显的灰黑描边（"只有上面没有黑线"的反馈）。改为全局一致、低透明度
+        // 的受光描边：浅色主题下几乎不可见的细线、深色主题下为柔和高光，
+        // 既保留玻璃边缘的立体感，又消除刺眼的黑边。
+        final sideRim = isDark
+            ? Colors.white.withValues(alpha: 0.10)
+            : Colors.black.withValues(alpha: 0.05);
         final border = Border(
           top: BorderSide(
             color: isDark
-                ? Colors.white.withValues(alpha: 0.16)
-                : Colors.white.withValues(alpha: 0.5),
+                ? Colors.white.withValues(alpha: 0.18)
+                : Colors.white.withValues(alpha: 0.6),
             width: 1.0,
           ),
-          left: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : scheme.outlineVariant.withValues(alpha: 0.42),
-            width: 0.8,
-          ),
-          right: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : scheme.outlineVariant.withValues(alpha: 0.42),
-            width: 0.8,
-          ),
-          bottom: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : scheme.outlineVariant.withValues(alpha: 0.42),
-            width: 0.8,
-          ),
+          left: BorderSide(color: sideRim, width: 0.8),
+          right: BorderSide(color: sideRim, width: 0.8),
+          bottom: BorderSide(color: sideRim, width: 0.8),
         );
 
         final defaultShadow = [
