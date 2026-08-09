@@ -1388,7 +1388,29 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
           title: song.title,
           subtitle: song.artistDisplayName,
           titleColor: titleColor,
-          trailing: null,
+          trailing: song.qualityLabel != null
+              ? Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: theme.colorScheme.primary.withOpacity(0.6),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Text(
+                    song.qualityLabel!,
+                    style: TextStyle(
+                      fontSize: 9,
+                      height: 1.1,
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.primary,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                )
+              : null,
           onTap: () async {
             if (_multiSelect.value) {
               final next = _selectedIds.value.toSet();

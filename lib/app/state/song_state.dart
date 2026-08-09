@@ -58,6 +58,37 @@ class SongEntity {
     }
   }
 
+  /// 音质标识（如 FLAC / 320K / 无损 / DSD），供歌曲列表项展示。
+  ///
+  /// 优先级：无损格式（flac/alac/wav/dsd…）直接显示格式名；否则按码率估算
+  /// （≥900kbps 视为「无损」，其余显示「{k}K」）。无音质数据返回 null（不显示）。
+  String? get qualityLabel {
+    final raw = (format ?? codec ?? '').trim().toLowerCase();
+    const lossless = {
+      'flac',
+      'alac',
+      'wav',
+      'ape',
+      'tta',
+      'wv',
+      'dsd',
+      'dsf',
+      'dff',
+      'truehd',
+      'mlp',
+    };
+    if (raw.isNotEmpty && lossless.contains(raw)) {
+      if (raw == 'dsf' || raw == 'dff') return 'DSD';
+      return raw.toUpperCase(); // FLAC / ALAC / WAV ...
+    }
+    if (bitrate != null && bitrate! > 0) {
+      final k = (bitrate! / 1000).round();
+      return k >= 900 ? '无损' : '${k}K';
+    }
+    if (raw.isNotEmpty) return raw.toUpperCase();
+    return null;
+  }
+
   /// 解析第一个 artist 的 guid
   String? get firstArtistGuid {
     try {

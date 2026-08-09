@@ -683,6 +683,7 @@ class _SongListTile extends StatelessWidget {
       size: 48,
       borderRadius: 8,
     );
+    final qualityTag = song.qualityLabel;
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -732,6 +733,28 @@ class _SongListTile extends StatelessWidget {
                 ],
               ),
             ),
+            if (qualityTag != null)
+              Container(
+                margin: const EdgeInsets.only(left: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: theme.colorScheme.primary.withOpacity(0.6),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  qualityTag,
+                  style: TextStyle(
+                    fontSize: 9,
+                    height: 1.1,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.primary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
             if (isPlaying)
               Container(
                 margin: const EdgeInsets.only(left: 4),
