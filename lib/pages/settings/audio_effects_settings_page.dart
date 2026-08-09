@@ -53,14 +53,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
               title: '均衡器预设',
               children: [
                 for (final preset in AudioEffectsSettings.presets)
-                  AppSettingTile(
-                    title: preset.name,
-                    subtitle: preset.id == 'off' ? '原始声音' : '音效曲线',
-                    trailing: currentId == preset.id
-                        ? const Icon(Icons.check_rounded, size: 20)
-                        : null,
-                    onTap: () => _selectPreset(preset.id),
-                  ),
+                  _buildPresetTile(context, preset, currentId),
               ],
             ),
           ),
@@ -93,6 +86,101 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 构建预设列表项：标题 + 标识徽章 + 副标题 + 选中勾。
+  Widget _buildPresetTile(
+    BuildContext context,
+    EqualizerPreset preset,
+    String currentId,
+  ) {
+    final theme = Theme.of(context);
+    final isSelected = currentId == preset.id;
+    final badgeTag = preset.tag;
+    final badgeColor = preset.tagColor;
+
+    return InkWell(
+      onTap: () => _selectPreset(preset.id),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: isSelected
+              ? theme.colorScheme.primaryContainer.withOpacity(0.5)
+              : Colors.transparent,
+        ),
+        child: Row(
+          children: [
+            // 左侧：名称 + 徽章
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        preset.name,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight:
+                              isSelected ? FontWeight.w700 : FontWeight.w600,
+                          color: isSelected
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      if (badgeTag != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(4),
+                            color: badgeColor.withOpacity(0.12),
+                            border: Border.all(
+                              color: badgeColor.withOpacity(0.5),
+                              width: 0.7,
+                            ),
+                          ),
+                          child: Text(
+                            badgeTag,
+                            style: TextStyle(
+                              fontSize: 9,
+                              height: 1.3,
+                              fontWeight: FontWeight.w800,
+                              color: badgeColor,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    preset.id == 'off' ? '原始声音' : '音效曲线',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 右侧：选中勾
+            if (isSelected)
+              Icon(
+                Icons.check_rounded,
+                size: 22,
+                color: theme.colorScheme.primary,
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 音效预设（均衡器曲线）。每条预设是一组按频段从低到高排列的增益（dB），
@@ -22,6 +23,37 @@ class EqualizerPreset {
     final t = bandCount <= 1 ? 0.0 : bandIndex / (bandCount - 1);
     final idx = (t * (gains.length - 1)).round().clamp(0, gains.length - 1);
     return gains[idx];
+  }
+
+  /// 预设标识标签（用于 UI 徽章显示），null 则不显示徽章。
+  String? get tag {
+    switch (id) {
+      case 'off': return null; // 关闭不显示标签
+      case 'pop': return 'POP';
+      case 'rock': return 'ROCK';
+      case 'classical': return 'CLASSIC';
+      case 'vocal': return 'VOCAL';
+      case 'dance': return 'DANCE';
+      case 'bass': return 'BASS';
+      case 'bright': return 'HI-FI';
+      case 'misound': return 'Mi Sound';
+      default: return null;
+    }
+  }
+
+  /// 标识标签颜色。
+  Color get tagColor {
+    switch (id) {
+      case 'pop': return const Color(0xFF4CAF50); // 绿
+      case 'rock': return const Color(0xFFF44336); // 红
+      case 'classical': return const Color(0xFF9C27B0); // 紫
+      case 'vocal': return const Color(0xFF2196F3); // 蓝
+      case 'dance': return const Color(0xFFE91E63); // 粉
+      case 'bass': return const Color(0xFFFF5722); // 橙红
+      case 'bright': return const Color(0xFF00BCD4); // 青
+      case 'misound': return const Color(0xFFFF9800); // 琥珀橙（小米色）
+      default: return Colors.grey;
+    }
   }
 }
 
