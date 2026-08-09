@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/services/audio_effects_service.dart';
 import '../../app/state/settings_audio_effects_state.dart';
@@ -48,20 +48,20 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
     await AudioEffectsService.instance.applyCurrent();
   }
 
+  /// 系统设置跳转 MethodChannel（对应 MainActivity.kt 的 system_settings 通道）。
+  static const MethodChannel _systemSettings =
+      MethodChannel('com.feiniu.music/system_settings');
+
   /// 打开系统均衡器（Android 标准音频效果控制面板）。
-  /// 打开系统均衡器。
   ///
-  /// 通过官方 [android_intent_plus] 发送
+  /// 通过原生 MethodChannel 发送
   /// [AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL] intent，
   /// 与 Spotify / Google Play Music 相同的实现方式，
   /// 小米 / 三星 / 一加等 OEM 均已适配。仅 Android 平台有效。
   Future<void> _openSystemEqualizer() async {
     if (!Platform.isAndroid) return;
     try {
-      final intent = AndroidIntent(
-        action: 'android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL',
-      );
-      await intent.launch();
+      await _systemSettings.invokeMethod<bool>('openSystemEqualizer');
     } catch (_) {
       // 静默失败——部分定制 ROM 可能未注册此 intent
     }
@@ -71,10 +71,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   Future<void> _openMiSoundSettings() async {
     if (!Platform.isAndroid) return;
     try {
-      final intent = AndroidIntent(
-        action: 'android.settings.SOUND_SETTINGS',
-      );
-      await intent.launch();
+      await _systemSettings.invokeMethod<bool>('openSoundSettings');
     } catch (_) {
       // 静默失败
     }

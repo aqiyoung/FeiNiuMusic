@@ -43,6 +43,7 @@ class MainActivity : AudioServiceActivity() {
     private val islandLyricChannelName = "com.feiniu.music/island_lyric"
     private val islandShizukuChannelName = "com.feiniu.music/island_lyric_shizuku"
     private val matchPluginChannelName = "com.feiniu.music/match_plugin"
+    private val systemSettingsChannelName = "com.feiniu.music/system_settings"
     private val notificationId = 10010
     private val notificationChannelId = "meizu_lyric_channel"
     private var flagShowTicker: Int? = null
@@ -334,6 +335,38 @@ class MainActivity : AudioServiceActivity() {
                         } catch (e: Exception) {
                             result.error("PLUGIN_ERROR", e.message ?: "plugin error", null)
                         }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 系统设置跳转通道：直接发真实的 Android 系统 Intent（系统均衡器 / 声音设置），
+        // 不依赖任何第三方包。对应 Android 官方 AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL，
+        // 与 Spotify / Google Play Music 的实现方式一致。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            systemSettingsChannelName
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "openSystemEqualizer" -> {
+                    try {
+                        val intent = Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL")
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (_: Throwable) {
+                        result.success(false)
+                    }
+                }
+                "openSoundSettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_SOUND_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (_: Throwable) {
+                        result.success(false)
                     }
                 }
                 else -> result.notImplemented()
