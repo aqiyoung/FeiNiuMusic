@@ -85,6 +85,41 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
     }
   }
 
+  /// 打开 Mi Sound 系统音效设置（MIUI/HyperOS → 声音与振动）。
+  Future<void> _openMiSoundSettings() async {
+    try {
+      // 优先尝试 MIUI 音效设置页
+      if (!await launchUrl(
+        Uri.parse('android.settings.SOUND_SETTINGS'),
+        mode: LaunchMode.externalApplication,
+      )) {
+        // 回退到通用声音设置
+        if (!await launchUrl(
+          Uri.parse('android.settings.SETTINGS'),
+          mode: LaunchMode.externalApplication,
+        )) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('请前往 系统 → 声音与振动 查找 Mi Sound'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('请手动前往系统设置 → 声音'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -161,22 +196,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
                 subtitle: 'Android Audio Effect',
                 onTap: _openSystemEqualizer,
               ),
-              _buildExternalFxTile(
-                context,
-                icon: Icons.speaker_group_rounded,
-                iconColor: const Color(0xFFFF9800),
-                title: 'Mi Sound',
-                subtitle: '小米设备系统级音效（需 MIUI/HyperOS）',
-                onTap: () => _showMiSoundInfo(context),
-              ),
-              _buildExternalFxTile(
-                context,
-                icon: Icons.music_note_rounded,
-                iconColor: const Color(0xFFE91E63),
-                title: 'Salt Player AudioFX',
-                subtitle: '第三方 EQ 引擎（需安装 Salt Player）',
-                onTap: () => _showSaltFxInfo(context),
-              ),
+              _buildMiSoundTile(context),
             ],
           ),
 
@@ -460,75 +480,71 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // 信息弹窗
+  // Mi Sound 入口（MI logo + 跳转系统设置）
   // ═══════════════════════════════════════════════════════════════
 
-  void _showMiSoundInfo(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.speaker_group_rounded, color: Color(0xFFFF9800)),
-            SizedBox(width: 10),
-            Text('Mi Sound'),
-          ],
-        ),
-        content: const Text(
-          'Mi Sound 是小米设备的系统级音效引擎，通过 DSP 处理提升听感。\n\n'
-          '启用方式：\n'
-          '1. 进入 系统 → 声音与振动 → 音质音效\n'
-          '2. 开启 Mi Sound / 小米音效\n\n'
-          '注意：本 App 内置的「Mi Sound」预设是 EQ 曲线近似方案，'
-          '跨设备可用。若你的设备支持真 Mi Sound，建议两者配合使用。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildMiSoundTile(BuildContext context) {
+    final theme = Theme.of(context);
 
-  void _showSaltFxInfo(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+    return InkWell(
+      onTap: _openMiSoundSettings,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+        child: Row(
           children: [
-            Icon(Icons.music_note_rounded, color: Color(0xFFE91E63)),
-            SizedBox(width: 10),
-            Text('Salt Player AudioFX'),
+            // MI logo：橙色方块 + 白色 "mi"
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: const Color(0xFFFF6A00), // Xiaomi 橙
+              ),
+              child: const Center(
+                child: Text(
+                  'mi',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'MISOUND',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    '小米设备系统级音效',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ],
         ),
-        content: const Text(
-          'Salt Player 自带的 V3/V4 音效引擎，提供更精细的 EQ 控制。\n\n'
-          '使用方式：\n'
-          '1. 安装 Salt Player（GitHub/Mirrors 可下载）\n'
-          '2. 在 Salt Player 中配置好音效\n'
-          '3. 全局生效（作为系统级音效处理）\n\n'
-          '本 App 内置均衡器与 Salt Player AudioFX 不冲突，可叠加使用。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('知道了'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              launchUrl(
-                Uri.parse('https://github.com/Moriafly/SaltPlayerSource'),
-                mode: LaunchMode.externalApplication,
-              );
-            },
-            child: const Text('前往下载'),
-          ),
-        ],
       ),
     );
   }
