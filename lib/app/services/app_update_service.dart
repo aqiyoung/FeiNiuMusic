@@ -7,6 +7,7 @@ class AppUpdateInfo {
   final String? releaseUrl;
   final String? releaseNotes;
   final bool hasUpdate;
+  final bool isCritical;
 
   const AppUpdateInfo({
     required this.latestVersion,
@@ -14,6 +15,7 @@ class AppUpdateInfo {
     this.releaseName,
     this.releaseUrl,
     this.releaseNotes,
+    this.isCritical = false,
   });
 }
 
@@ -78,12 +80,14 @@ class AppUpdateService {
       final htmlUrl = data['html_url'] as String?;
 
       final hasUpdate = _compareVersions(latestName, currentVersion) > 0;
+      final isCritical = _isCriticalRelease(body ?? '');
       return AppUpdateInfo(
         latestVersion: latestName,
         hasUpdate: hasUpdate,
         releaseName: releaseName,
         releaseUrl: htmlUrl ?? releasePageUrl,
         releaseNotes: body,
+        isCritical: isCritical,
       );
     } catch (e) {
       return AppUpdateInfo(latestVersion: currentVersion, hasUpdate: false);
@@ -96,6 +100,18 @@ class AppUpdateService {
       return value.substring(1);
     }
     return value;
+  }
+
+  /// 与 sanyelive 一致的 critical 判定: release body 首非空行含
+  /// "**P0**" 或 "**critical**" (case-insensitive) → 重要更新, 弹窗强制升级
+  /// (不显示"稍后"). 仅在发版时在正文首行显式打标记才生效.
+  static bool _isCriticalRelease(String body) {
+    final firstLine = body
+        .split('\n')
+        .map((l) => l.trim())
+        .firstWhere((l) => l.isNotEmpty, orElse: () => '');
+    final lower = firstLine.toLowerCase();
+    return lower.contains('**p0**') || lower.contains('**critical**');
   }
 
   int _compareVersions(String a, String b) {

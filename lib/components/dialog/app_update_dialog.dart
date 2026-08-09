@@ -17,6 +17,9 @@ Future<void> _openUrl(BuildContext context, String url) async {
   }
 }
 
+/// 用 gh-proxy 包裹 GitHub 链接, 国内/弱网用户直连失败时兜底.
+String _proxyUrl(String url) => 'https://gh-proxy.com/$url';
+
 /// Polished "update available" prompt. Shown for both manual checks and the
 /// auto-check-on-launch flow.
 Future<void> showAppUpdateDialog(
@@ -134,20 +137,22 @@ class _UpdateAvailableDialog extends StatelessWidget {
                       color: Colors.white.withValues(alpha: 0.22),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.rocket_launch_rounded,
-                      color: Colors.white,
-                      size: 24,
-                    ),
+                      child: Icon(
+                        info.isCritical
+                            ? Icons.priority_high
+                            : Icons.rocket_launch_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          '发现新版本',
-                          style: TextStyle(
+                        Text(
+                          info.isCritical ? '重要更新' : '发现新版本',
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -216,13 +221,39 @@ class _UpdateAvailableDialog extends StatelessWidget {
                 ),
               ),
             Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              child: Text(
+                '「前往下载」直接跳转 GitHub Release 页, 在页面里点下载; '
+                '国内访问不畅时点「代理下载」走 gh-proxy 打开同一页面',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+            Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  if (!info.isCritical)
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('稍后'),
+                    ),
+                  if (!info.isCritical) const SizedBox(width: 8),
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('稍后'),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _openUrl(
+                        context,
+                        _proxyUrl(
+                          info.releaseUrl ?? AppUpdateService.releasePageUrl,
+                        ),
+                      );
+                    },
+                    child: const Text('代理下载'),
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
