@@ -1390,19 +1390,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
         if (qualityTag != null && badgeColor != null) {
           subtitleWidget = Row(
             children: [
-              Expanded(
-                child: Text(
-                  song.artistDisplayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: subtitleColor,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
               Container(
-                margin: const EdgeInsets.only(left: 6),
+                margin: const EdgeInsets.only(right: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 0.5),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(3),
@@ -1418,6 +1407,17 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                     fontWeight: FontWeight.w800,
                     color: badgeColor,
                     letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  song.artistDisplayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: subtitleColor,
+                    fontSize: 12,
                   ),
                 ),
               ),

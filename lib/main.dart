@@ -75,6 +75,9 @@ Future<void> main() async {
   // 读 shouldAutoPlayOnAppLaunch）之前确定，否则首次启动引导页勾选的
   // 「进入应用自动播放」可能在本次启动就被自动播放（应等下次启动生效）。
   await AppOnboardingSettings.ensureLoaded();
+  // 转码设置须在 PlayerService（MediaNotificationService.init）之前加载：
+  // 启动恢复自动播放时 _sourceForSong 会同步读转码开关，未加载会读到默认关。
+  await AppTranscodeSettings.ensureLoaded();
   await AuthService.instance.init();
   await MediaNotificationService.init();
   // 切歌通知监听：PlayerService 已构造（MediaNotificationService.init 内），
@@ -101,6 +104,8 @@ Future<void> main() async {
   await AccountStore.instance.init();
   await PlayerStyleSettings.ensureLoaded();
   await AppLaunchNavigationSettings.ensureLoaded();
+  // DLNA 投屏设置（播放页投屏按钮据此显示/隐藏）
+  await DlnaCastSettings.ensureLoaded();
   // 初始化自动重连服务（监听网络变化 + API 失败）
   FnAutoReconnectService.instance.init();
   // 迁移歌曲缓存到系统标准缓存目录后，启动时顺手清理旧版 app-support 目录中的

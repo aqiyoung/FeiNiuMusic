@@ -781,17 +781,9 @@ class _SongListTile extends StatelessWidget {
 
     return Row(
       children: [
-        Expanded(
-          child: Text(
-            song.artistDisplayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: subtitleStyle,
-          ),
-        ),
         if (qualityTag != null) ...[
           Container(
-            margin: const EdgeInsets.only(left: 6),
+            margin: const EdgeInsets.only(right: 6),
             padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 0.5),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(3),
@@ -811,6 +803,14 @@ class _SongListTile extends StatelessWidget {
             ),
           ),
         ],
+        Expanded(
+          child: Text(
+            song.artistDisplayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: subtitleStyle,
+          ),
+        ),
       ],
     );
   }
