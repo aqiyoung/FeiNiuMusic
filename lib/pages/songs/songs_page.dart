@@ -723,7 +723,6 @@ class _SongListTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   _buildSubtitleWithQualityBadge(
-                    context,
                     theme,
                     qualityTag,
                     qualityLevel,
@@ -732,8 +731,8 @@ class _SongListTile extends StatelessWidget {
               ),
             ),
             if (isPlaying)
-              Container(
-                margin: const EdgeInsets.only(left: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
                 child: PlayingBars(
                   color: theme.colorScheme.primary,
                   animating: true,
@@ -745,9 +744,8 @@ class _SongListTile extends StatelessWidget {
     );
   }
 
-  /// 副标题行：歌手名 + 音质标签(SQ/HR/320K) 内联显示。
+  /// 副标题行：歌手名 + 音质标签(SQ/HR/176K) 内联显示（紧贴歌手名后）。
   Widget _buildSubtitleWithQualityBadge(
-    BuildContext context,
     ThemeData theme,
     String? qualityTag,
     String? qualityLevel,

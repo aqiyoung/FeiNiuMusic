@@ -61,8 +61,8 @@ class SongEntity {
   /// 音质等级（供 UI 渲染不同颜色）。
   ///
   /// - `sq`：无损格式（FLAC/ALAC/WAV/APE 等）
-  /// - `hr`：高解析度（DSD/DSF/DFF 或码率 ≥ 900kbps）
-  /// - `normal`：有损压缩（显示具体码率如 320K）
+  /// - `hr`：高解析度（DSD/DSF/DFF，或采样率 ≥ 96kHz 即 176.4k/192k 等，或码率 ≥ 176kbps）
+  /// - `normal`：有损压缩（显示具体码率如 128K）
   /// - `null`：无音质数据
   String? get qualityLevel {
     final raw = (format ?? codec ?? '').trim().toLowerCase();
@@ -72,9 +72,10 @@ class SongEntity {
     };
     if (raw.isNotEmpty && lossless.contains(raw)) return 'sq';
     if (raw == 'dsf' || raw == 'dff' || raw == 'dsd') return 'hr';
-    if (bitrate != null && bitrate! > 0) {
-      return (bitrate! / 1000).round() >= 900 ? 'hr' : 'normal';
-    }
+    // 高解析度：DSD，或采样率 ≥ 96kHz（176.4k/192k 等 Hi-Res），或码率 ≥ 176kbps
+    if (sampleRate != null && sampleRate! >= 96000) return 'hr';
+    if (bitrate != null && bitrate! >= 176000) return 'hr';
+    if (bitrate != null && bitrate! > 0) return 'normal';
     if (raw.isNotEmpty) return 'sq'; // 未知无损格式归为 SQ
     return null;
   }
