@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.os.Build
+import android.content.pm.PackageManager
 import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
@@ -33,6 +34,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : AudioServiceActivity() {
     private val channelName = "com.feiniu.music/meizu_lyrics"
@@ -341,79 +343,101 @@ class MainActivity : AudioServiceActivity() {
             }
         }
 
-        // 系统设置跳转通道：直接发真实的 Android 系统 Intent（系统均衡器 / 声音设置），
-        // 不依赖任何第三方包。
+        // 系统设置跳转通道：直接发真实的 Android 系统 Intent（系统均衡器 / 音质音效）。
+        // 不依赖任何第三方包。多候选 + 运行时 Activity 自发现，跨 OEM/版本稳健。
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             systemSettingsChannelName
         ).setMethodCallHandler { call, result ->
             when (call.method) {
-                "openSystemEqualizer" -> {
-                    try {
-                        // Android 官方标准音频效果控制面板（Spotify / Google Play Music 同款）。
-                        // 必须传 EXTRA_PACKAGE_NAME + EXTRA_CONTENT_TYPE，否则大部分 OEM 不响应。
-                        val intent = Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL").apply {
-                            putExtra("android.media.extra.PACKAGE_NAME", packageName)
-                            putExtra("android.media.extra.CONTENT_TYPE", 0) // MUSIC
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                        result.success(true)
-                    } catch (_: Throwable) {
-                        // 回退：尝试打开系统 EQ 设置页（部分 OEM 支持）
-                        try {
-                            val fallback = Intent("android.media.action.EQUALIZER").apply {
-                                putExtra("android.media.extra.PACKAGE_NAME", packageName)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(fallback)
-                            result.success(true)
-                        } catch (_: Throwable) {
-                            result.success(false)
-                        }
-                    }
-                }
-                "openMiSoundQuality" -> {
-                    // 小米 HyperOS/MIUI：直接跳转到「声音与振动 → 音质音效」页面。
-                    // 使用 ComponentName 精确指向 MIUI 音质音效 Activity，
-                    // 避免 ACTION_SOUND_SETTINGS 只停在上一级「声音与振动」。
-                    var ok = false
-                    // 方案 1：MIUI/HyperOS 专用音质音效 Activity
-                    try {
-                        val intent = Intent().apply {
-                            component = ComponentName(
-                                "com.android.settings",
-                                "com.android.settings.Settings\$SoundQualitySettingsActivity"
-                            )
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                        ok = true
-                    } catch (_: Throwable) {}
-                    // 方案 2：部分 HyperOS 版本用不同类名
-                    if (!ok) {
-                        try {
-                            val intent = Intent("miui.settings.SOUND_QUALITY").apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(intent)
-                            ok = true
-                        } catch (_: Throwable) {}
-                    }
-                    // 方案 3：回退到通用声音设置（非小米设备）
-                    if (!ok) {
-                        try {
-                            val intent = Intent(Settings.ACTION_SOUND_SETTINGS).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(intent)
-                            ok = true
-                        } catch (_: Throwable) {}
-                    }
-                    result.success(ok)
-                }
+                "openSystemEqualizer" -> result.success(openSystemEqualizer())
+                "openMiSoundQuality" -> result.success(openMiSoundQuality())
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /**
+     * 打开系统均衡器：优先 Android 官方 DISPLAY_AUDIO_EFFECT_CONTROL_PANEL
+     * （Spotify / Google Play Music 同款）；无处理者则回退到系统「音质音效 / 均衡器」
+     * Activity（运行时自发现），最后兜底到声音设置 / 主设置页。
+     * 全程静默，不弹提示。返回是否成功发起跳转。
+     */
+    private fun openSystemEqualizer(): Boolean {
+        // 1) Android 官方标准音频效果控制面板
+        if (tryStart(Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL").apply {
+                putExtra("android.media.extra.PACKAGE_NAME", packageName)
+                putExtra("android.media.extra.CONTENT_TYPE", 0) // MUSIC
+            })) return true
+        // 2) 部分 OEM 的 EQUALIZER action
+        if (tryStart(Intent("android.media.action.EQUALIZER").apply {
+                putExtra("android.media.extra.PACKAGE_NAME", packageName)
+            })) return true
+        // 3) 运行时自发现系统「均衡器 / 音质音效」Activity
+        if (launchSettingsActivityByKeyword(
+                listOf("equalizer", "soundquality", "soundenhancement", "misound", "soundeffect")
+            )
+        ) return true
+        // 4) 兜底：声音设置 → 主设置
+        if (tryStart(Intent(Settings.ACTION_SOUND_SETTINGS))) return true
+        if (tryStart(Intent(Settings.ACTION_SETTINGS))) return true
+        return false
+    }
+
+    /**
+     * 打开小米「音质音效 / Mi Sound」：运行时自发现 Settings 内含有关键字的
+     * Activity（不同 MIUI/HyperOS 版本类名不同），直接到达「音质音效」页；
+     * 兜底到声音设置 / 主设置页。全程静默。返回是否成功发起跳转。
+     */
+    private fun openMiSoundQuality(): Boolean {
+        // 1) 运行时自发现「音质音效 / 音效」Activity
+        if (launchSettingsActivityByKeyword(
+                listOf("soundquality", "soundenhancement", "misound", "soundeffect", "sound")
+            )
+        ) return true
+        // 2) 已知 MIUI action（部分版本有效）
+        if (tryStart(Intent("miui.settings.SOUND_QUALITY"))) return true
+        // 3) 兜底：声音设置 → 主设置
+        if (tryStart(Intent(Settings.ACTION_SOUND_SETTINGS))) return true
+        if (tryStart(Intent(Settings.ACTION_SETTINGS))) return true
+        return false
+    }
+
+    /** 尝试启动给定 Intent，成功返回 true；任何异常（含 Activity 不存在）静默吞掉。 */
+    private fun tryStart(intent: Intent): Boolean {
+        return try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * 运行时枚举 com.android.settings 的所有 Activity，按关键字匹配类名，
+     * 启动第一个命中项。跨 MIUI/HyperOS 版本自适应，避免硬编码类名猜错。
+     * 若系统包可见性限制导致枚举为空，返回 false（由调用方兜底到声音设置）。
+     */
+    private fun launchSettingsActivityByKeyword(keywords: List<String>): Boolean {
+        return try {
+            val pm = packageManager
+            val pi = pm.getPackageInfo(
+                "com.android.settings",
+                PackageManager.GET_ACTIVITIES
+            )
+            val kw = keywords.map { it.lowercase(Locale.ROOT) }
+            val name = pi.activities?.firstOrNull { ai ->
+                val cls = ai.name.lowercase(Locale.ROOT)
+                kw.any { cls.contains(it) }
+            }?.name
+            if (name != null) {
+                tryStart(Intent().apply { component = ComponentName("com.android.settings", name) })
+            } else {
+                false
+            }
+        } catch (_: Throwable) {
+            false
         }
     }
 
