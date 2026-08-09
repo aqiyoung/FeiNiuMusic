@@ -359,8 +359,9 @@ class MainActivity : AudioServiceActivity() {
 
     /**
      * 打开系统均衡器：优先 Android 官方 DISPLAY_AUDIO_EFFECT_CONTROL_PANEL
-     * （Spotify / Google Play Music 同款）；无处理者则回退到系统「音质音效 / 均衡器」
-     * Activity（运行时自发现），最后兜底到声音设置 / 主设置页。
+     * （Spotify / Google Play Music 同款）；HyperOS 3.0 无独立系统均衡器 intent，
+     * 均衡器内置于「音质音效」App（com.miui.misound），故以其为主兜底；
+     * 再回退到系统「音质音效 / 均衡器」Activity 自发现，最后声音设置 / 主设置页。
      * 全程静默，不弹提示。返回是否成功发起跳转。
      */
     private fun openSystemEqualizer(): Boolean {
@@ -373,6 +374,8 @@ class MainActivity : AudioServiceActivity() {
         if (tryStart(Intent("android.media.action.EQUALIZER").apply {
                 putExtra("android.media.extra.PACKAGE_NAME", packageName)
             })) return true
+        // 2.5) HyperOS 3.0：均衡器内置于「音质音效」App，直接启动该 App
+        if (launchPackage("com.miui.misound")) return true
         // 3) 运行时自发现系统「均衡器 / 音质音效」Activity
         if (launchSettingsActivityByKeyword(
                 listOf("equalizer", "soundquality", "soundenhancement", "misound", "soundeffect")
@@ -390,14 +393,16 @@ class MainActivity : AudioServiceActivity() {
      * 兜底到声音设置 / 主设置页。全程静默。返回是否成功发起跳转。
      */
     private fun openMiSoundQuality(): Boolean {
-        // 1) 运行时自发现「音质音效 / 音效」Activity
+        // 1) HyperOS 3.0：「音质音效」是独立 App (com.miui.misound)，直接启动其主入口直达该页
+        if (launchPackage("com.miui.misound")) return true
+        // 2) 运行时自发现 Settings 内含「音质音效 / 音效」关键字的 Activity
         if (launchSettingsActivityByKeyword(
                 listOf("soundquality", "soundenhancement", "misound", "soundeffect", "sound")
             )
         ) return true
-        // 2) 已知 MIUI action（部分版本有效）
+        // 3) 已知 MIUI action（部分版本有效）
         if (tryStart(Intent("miui.settings.SOUND_QUALITY"))) return true
-        // 3) 兜底：声音设置 → 主设置
+        // 4) 兜底：声音设置 → 主设置
         if (tryStart(Intent(Settings.ACTION_SOUND_SETTINGS))) return true
         if (tryStart(Intent(Settings.ACTION_SETTINGS))) return true
         return false
@@ -409,6 +414,26 @@ class MainActivity : AudioServiceActivity() {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
             true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * 通过包名启动某 App 的启动 Activity（launch intent）。
+     * 用于 HyperOS 3.0 的「音质音效」独立 App（com.miui.misound）。
+     * 返回是否成功（App 已安装且有启动入口）。
+     */
+    private fun launchPackage(pkg: String): Boolean {
+        return try {
+            val intent = packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                true
+            } else {
+                false
+            }
         } catch (_: Throwable) {
             false
         }
