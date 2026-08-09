@@ -23,6 +23,10 @@ class AudioEffectsService {
   static const double _bassTargetGain = 6.0; // dB
   static const double _bassEqBoost = 5.0; // dB，回退方案用
 
+  /// 压限器（动态范围压缩）通过 LoudnessEnhancer 的目标增益实现：
+  /// 开启后设为较低增益（3dB），使响亮部分被压、安静部分被提。
+  static const double _compressorTargetGain = 3.0; // dB
+
   /// 记录当前活跃的支持音效的引擎（仅 just_audio）。非 just_audio 引擎传 null。
   void setActiveEngine(JustAudioEngine? engine) => _activeEngine = engine;
 
@@ -44,6 +48,7 @@ class AudioEffectsService {
         AudioEffectsSettings.presetId.value,
       );
       final bass = AudioEffectsSettings.bassBoost.value;
+      final comp = AudioEffectsSettings.compressor.value;
 
       final eq = engine.androidEqualizer;
       if (eq != null) {
@@ -71,8 +76,19 @@ class AudioEffectsService {
 
       final loud = engine.androidLoudnessEnhancer;
       if (loud != null) {
-        await loud.setTargetGain(bass ? _bassTargetGain : 0.0);
-        await loud.setEnabled(bass);
+        // 压限器或重低音任一开启时启用 LoudnessEnhancer
+        final enableLoud = bass || comp;
+        // 压限器优先（更低增益）；重低音用更高增益；两者都开取中间值
+        double targetGain = 0.0;
+        if (comp && !bass) {
+          targetGain = _compressorTargetGain;
+        } else if (bass && !comp) {
+          targetGain = _bassTargetGain;
+        } else if (comp && bass) {
+          targetGain = (_bassTargetGain + _compressorTargetGain) / 2; // ~4.5dB
+        }
+        await loud.setTargetGain(targetGain);
+        await loud.setEnabled(enableLoud);
       }
     } catch (e) {
       if (kDebugMode) {

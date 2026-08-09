@@ -57,18 +57,20 @@ class EqualizerPreset {
   }
 }
 
-/// 音效设置：均衡器预设 + 重低音增强开关。
+/// 音效设置：均衡器预设 + 重低音增强开关 + 压限器开关。
 ///
 /// 仅 Android 系统解码（just_audio 引擎）播放时生效；media_kit（FLAC/DSF
 /// 软解）一路暂不支持。UI 修改后需由 [AudioEffectsService] 应用到引擎。
 class AudioEffectsSettings {
   static const String _prefsPreset = 'audio_effects_preset';
   static const String _prefsBass = 'audio_effects_bass_boost';
+  static const String _prefsCompressor = 'audio_effects_compressor';
 
   static const String defaultPresetId = 'off';
 
   static final ValueNotifier<String> presetId = ValueNotifier(defaultPresetId);
   static final ValueNotifier<bool> bassBoost = ValueNotifier(false);
+  static final ValueNotifier<bool> compressor = ValueNotifier(false);
 
   /// 内置均衡器预设目录。
   static const List<EqualizerPreset> presets = [
@@ -102,6 +104,7 @@ class AudioEffectsSettings {
             ? stored
             : defaultPresetId;
     bassBoost.value = prefs.getBool(_prefsBass) ?? false;
+    compressor.value = prefs.getBool(_prefsCompressor) ?? false;
   }
 
   static Future<void> setPreset(String id) async {
@@ -115,5 +118,11 @@ class AudioEffectsSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsBass, enabled);
     bassBoost.value = enabled;
+  }
+
+  static Future<void> setCompressor(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsCompressor, enabled);
+    compressor.value = enabled;
   }
 }
