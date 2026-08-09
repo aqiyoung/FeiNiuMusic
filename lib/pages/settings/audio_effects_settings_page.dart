@@ -1,5 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:android_intent_plus/android_intent.dart';
 
 import '../../app/services/audio_effects_service.dart';
 import '../../app/state/settings_audio_effects_state.dart';
@@ -47,36 +49,32 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   }
 
   /// 打开系统均衡器（Android 标准音频效果控制面板）。
+  /// 打开系统均衡器。
   ///
-  /// 使用 [AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL] intent，
-  /// 与 Spotify / Google Play Music 相同的实现方式。
-  /// 大部分 OEM（小米/三星/一加等）均已适配此 intent。
+  /// 通过官方 [android_intent_plus] 发送
+  /// [AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL] intent，
+  /// 与 Spotify / Google Play Music 相同的实现方式，
+  /// 小米 / 三星 / 一加等 OEM 均已适配。仅 Android 平台有效。
   Future<void> _openSystemEqualizer() async {
+    if (!Platform.isAndroid) return;
     try {
-      await launchUrl(
-        Uri.parse('android.media.action#DISPLAY_AUDIO_EFFECT_CONTROL_PANEL'),
-        mode: LaunchMode.externalApplication,
+      final intent = AndroidIntent(
+        action: 'android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL',
       );
+      await intent.launch();
     } catch (_) {
       // 静默失败——部分定制 ROM 可能未注册此 intent
-      try {
-        await launchUrl(
-          Uri.parse('android.settings.SOUND_SETTINGS'),
-          mode: LaunchMode.externalApplication,
-        );
-      } catch (_) {
-        // 完全不提示
-      }
     }
   }
 
-  /// 打开 Mi Sound 系统音效设置（MIUI/HyperOS → 声音与振动）。
+  /// 打开 Mi Sound 系统音效设置（MIUI/HyperOS → 声音与振动 → 音质音效）。
   Future<void> _openMiSoundSettings() async {
+    if (!Platform.isAndroid) return;
     try {
-      await launchUrl(
-        Uri.parse('android.settings.SOUND_SETTINGS'),
-        mode: LaunchMode.externalApplication,
+      final intent = AndroidIntent(
+        action: 'android.settings.SOUND_SETTINGS',
       );
+      await intent.launch();
     } catch (_) {
       // 静默失败
     }
