@@ -46,41 +46,26 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
     await AudioEffectsService.instance.applyCurrent();
   }
 
-  /// 打开系统均衡器设置（Android Settings → 音效）。
+  /// 打开系统均衡器（Android 标准音频效果控制面板）。
+  ///
+  /// 使用 [AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL] intent，
+  /// 与 Spotify / Google Play Music 相同的实现方式。
+  /// 大部分 OEM（小米/三星/一加等）均已适配此 intent。
   Future<void> _openSystemEqualizer() async {
-    const url = 'package://com.android.settings/.settings.SoundSettingsActivity';
-    // 大部分 OEM 的系统均衡器在 SOUND_SETTINGS 里；若打不开则给 toast 提示。
     try {
-      // 先尝试通用 ACTION
-      if (!await launchUrl(
-        Uri.parse('android.settings.SOUND_SETTINGS'),
+      await launchUrl(
+        Uri.parse('android.media.action#DISPLAY_AUDIO_EFFECT_CONTROL_PANEL'),
         mode: LaunchMode.externalApplication,
-      )) {
-        // 回退：尝试直接打开 EQ intent（部分 OEM 支持）
-        if (!await launchUrl(
-          Uri.parse(
-            'android.settings.EQUALIZER',
-          ),
-          mode: LaunchMode.externalApplication,
-        )) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('请前往 系统 → 声音与振动 查找均衡器'),
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
-        }
-      }
+      );
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('请手动前往系统设置 → 声音'),
-            duration: Duration(seconds: 3),
-          ),
+      // 静默失败——部分定制 ROM 可能未注册此 intent
+      try {
+        await launchUrl(
+          Uri.parse('android.settings.SOUND_SETTINGS'),
+          mode: LaunchMode.externalApplication,
         );
+      } catch (_) {
+        // 完全不提示
       }
     }
   }
@@ -88,35 +73,12 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   /// 打开 Mi Sound 系统音效设置（MIUI/HyperOS → 声音与振动）。
   Future<void> _openMiSoundSettings() async {
     try {
-      // 优先尝试 MIUI 音效设置页
-      if (!await launchUrl(
+      await launchUrl(
         Uri.parse('android.settings.SOUND_SETTINGS'),
         mode: LaunchMode.externalApplication,
-      )) {
-        // 回退到通用声音设置
-        if (!await launchUrl(
-          Uri.parse('android.settings.SETTINGS'),
-          mode: LaunchMode.externalApplication,
-        )) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('请前往 系统 → 声音与振动 查找 Mi Sound'),
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
-        }
-      }
+      );
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('请手动前往系统设置 → 声音'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
+      // 静默失败
     }
   }
 
@@ -480,7 +442,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Mi Sound 入口（MI logo + 跳转系统设置）
+  // Mi Sound 入口（官方 MI logo + 静默跳转系统设置）
   // ═══════════════════════════════════════════════════════════════
 
   Widget _buildMiSoundTile(BuildContext context) {
@@ -493,25 +455,11 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
         child: Row(
           children: [
-            // MI logo：橙色方块 + 白色 "mi"
-            Container(
+            // 官方 MI logo（CustomPaint 绘制 simple-icons Xiaomi SVG 路径）
+            SizedBox(
               width: 40,
               height: 40,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: const Color(0xFFFF6A00), // Xiaomi 橙
-              ),
-              child: const Center(
-                child: Text(
-                  'mi',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-              ),
+              child: const _MiLogoPainterWidget(),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -607,7 +555,7 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
             ),
           ),
           Icon(
-            Icons.play_circle_outline_rounded,
+            play_circle_outline_rounded,
             size: 28,
             color: theme.colorScheme.primary.withOpacity(0.6),
           ),
@@ -615,4 +563,102 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
       ),
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 官方小米 MI logo（基于 simple-icons SVG 路径矢量绘制）
+// ═══════════════════════════════════════════════════════════════
+
+/// 小米官方 MI logo 绘制组件。
+///
+/// 使用 [CustomPainter] 基于 simple-icons 项目的小米 SVG 路径数据绘制，
+/// 包含圆角方形背景 + 白色 "mi" 字标。矢量渲染，任意缩放清晰。
+class _MiLogoPainterWidget extends StatelessWidget {
+  const _MiLogoPainterWidget();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _MiLogoPainter(),
+      size: Size.infinite,
+    );
+  }
+}
+
+class _MiLogoPainter extends CustomPainter {
+  // 小米品牌橙（Xiaomi Orange #FF6900）
+  static const Color _miOrange = Color(0xFFFF6900);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = _miOrange;
+
+    // 将 SVG viewBox (0,0,24,24) 映射到实际尺寸
+    final scale = size.width / 24;
+    canvas.save();
+    canvas.scale(scale);
+
+    // 官方路径：圆角方形背景 + "mi" 字标（来自 simple-icons/xiaomi.svg）
+    final path = Path()
+      ..addPath(Path()
+        ..moveTo(12, 0)
+        ..cubicTo(8.016, 0, 4.756, 0.255, 2.493, 2.516)
+        ..cubicTo(0.23, 4.776, 0, 8.033, 0, 12.012)
+        ..cubicTo(0, 15.992, 0.23, 19.235, 2.494, 21.497)
+        ..cubicTo(4.757, 23.77, 8.017, 24, 12, 24)
+        ..cubicTo(15.983, 24, 19.243, 23.77, 21.506, 21.509)
+        ..cubicTo(23.77, 19.247, 24, 15.99, 24, 12.012)
+        ..cubicTo(24, 8.028, 23.767, 4.769, 21.498, 2.508)
+        ..cubicTo(19.234, 0.252, 15.978, 0, 12, 0)
+        ..close(), Offset.zero)
+      ..addPath(Path()
+        ..moveTo(4.906, 7.405)
+        ..lineTo(10.53, 7.405)
+        ..cubicTo(11.999, 7.405, 13.536, 7.473, 14.293, 8.232)
+        ..cubicTo(15.039, 8.978, 15.120, 10.465, 15.123, 11.908)
+        ..lineTo(15.123, 16.448)
+        ..arcToPoint(Offset(14.971, 16.595), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(13.024, 16.595)
+        ..arcToPoint(Offset(12.872, 16.447), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(12.872, 11.83)
+        ..cubicTo(12.870, 11.024, 12.824, 10.196, 12.408, 9.779)
+        ..cubicTo(12.050, 9.419, 11.382, 9.338, 10.688, 9.320)
+        ..lineTo(7.158, 9.320)
+        ..arcToPoint(Offset(7.007, 9.467), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(7.007, 16.447)
+        ..arcToPoint(Offset(6.855, 16.595), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(4.906, 16.595)
+        ..arcToPoint(Offset(4.756, 16.447), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(4.756, 7.554)
+        ..arcToPoint(Offset(4.906, 7.405), radius: Radius.circular(0.15), clockwise: true)
+        ..close(), Offset.zero)
+      ..addPath(Path()
+        ..moveTo(17.037, 7.405)
+        ..lineTo(18.986, 7.405)
+        ..arcToPoint(Offset(19.136, 7.555), radius: Radius.circular(0.15), clockwise: true)
+        ..lineTo(19.136, 16.447)
+        ..arcToPoint(Offset(18.985, 16.595), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(17.037, 16.595)
+        ..arcToPoint(Offset(16.886, 16.447), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(16.886, 7.554)
+        ..arcToPoint(Offset(17.037, 7.405), radius: Radius.circular(0.15), clockwise: true)
+        ..close(), Offset.zero)
+      ..addPath(Path()
+        ..moveTo(8.92, 10.948)
+        ..lineTo(10.966, 10.948)
+        ..arcToPoint(Offset(11.116, 11.095), radius: Radius.circular(0.15), clockwise: true)
+        ..lineTo(11.116, 16.447)
+        ..arcToPoint(Offset(10.966, 16.595), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(8.92, 16.595)
+        ..arcToPoint(Offset(8.768, 16.447), radius: Radius.circular(0.15), clockwise: false)
+        ..lineTo(8.768, 11.095)
+        ..arcToPoint(Offset(8.92, 10.948), radius: Radius.circular(0.15), clockwise: true)
+        ..close(), Offset.zero);
+
+    canvas.drawPath(path, paint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
