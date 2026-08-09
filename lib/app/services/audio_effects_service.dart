@@ -20,12 +20,18 @@ class AudioEffectsService {
 
   /// 重低音增强通过 LoudnessEnhancer 的增益（dB）实现；设备不支持时回退为
   /// 给最低 3 段 EQ 额外叠加低音增益。
-  static const double _bassTargetGain = 6.0; // dB
-  static const double _bassEqBoost = 5.0; // dB，回退方案用
+  /// 注意：LoudnessEnhancer 是"整体响度增益"而非真正的压限器，增益过大会与
+  /// EQ 低段叠加导致整体削波破音，故取值保守。
+  static const double _bassTargetGain = 3.0; // dB
+  static const double _bassEqBoost = 3.0; // dB，回退方案用（叠加在预设低段上，严格限幅）
 
   /// 压限器（动态范围压缩）通过 LoudnessEnhancer 的目标增益实现：
-  /// 开启后设为较低增益（3dB），使响亮部分被压、安静部分被提。
-  static const double _compressorTargetGain = 3.0; // dB
+  /// 开启后设为较低增益（2dB），使响亮部分被压、安静部分被提。
+  static const double _compressorTargetGain = 2.0; // dB
+
+  /// 单频段增益安全上限（dB）：防止「预设低段 + 重低音叠加」把低段推到极端值、
+  /// 再叠加 LoudnessEnhancer 后整体削波破音。设备本身支持范围更窄时以设备范围为准。
+  static const double _maxBandGain = 7.0; // dB
 
   /// 记录当前活跃的支持音效的引擎（仅 just_audio）。非 just_audio 引擎传 null。
   void setActiveEngine(JustAudioEngine? engine) => _activeEngine = engine;
@@ -54,21 +60,22 @@ class AudioEffectsService {
       if (eq != null) {
         final params = await eq.parameters;
         final bands = params.bands;
-        // 应用均衡器预设到所有频段。
+        final minDb = params.minDecibels;
+        final maxDb = params.maxDecibels;
+        // 应用均衡器预设到所有频段，限制在设备支持范围内（防止越界导致异常/破音）。
         for (var i = 0; i < bands.length; i++) {
-          final gain = preset.gainFor(i, bands.length);
+          final gain = preset.gainFor(i, bands.length).clamp(minDb, maxDb);
           await bands[i].setGain(gain);
         }
         await eq.setEnabled(true);
 
-        // 重低音：额外给最低 3 段叠加低音增益（EQ 低段 + LoudnessEnhancer 双保险）。
+        // 重低音：给最低 3 段叠加低音增益。叠加后严格限幅到安全上限，避免与
+        // LoudnessEnhancer 的低音增益叠加把低段推到极端值、整体削波破音。
         if (bass) {
+          final ceiling = maxDb > _maxBandGain ? _maxBandGain : maxDb;
           for (var i = 0; i < bands.length && i < 3; i++) {
             final base = preset.gainFor(i, bands.length);
-            final g = (base + _bassEqBoost).clamp(
-              params.minDecibels,
-              params.maxDecibels,
-            );
+            final g = (base + _bassEqBoost).clamp(minDb, ceiling);
             await bands[i].setGain(g);
           }
         }
