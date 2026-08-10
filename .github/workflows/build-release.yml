@@ -164,4 +164,4 @@ jobs:
           files: |
             android-artifact/FeiNiuMusic-v*.apk
             android-artifact/FnMusicEnhance-*.fpk
-            windows-artifact/FeiNiuMusic-Windows-*.zip
+            windows-artifact/**/FeiNiuMusic-Windows-*.zip
