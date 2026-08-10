@@ -163,6 +163,10 @@
              需在 Android 11+ 包可见性下声明才能枚举其内部 Activity 并按关键字
              直达（否则 getPackageInfo 会抛 NameNotFoundException 而枚举失败）。 -->
         <package android:name="com.miui.misound" />
+        <!-- 系统设置内自发现「均衡器 / 音质音效」Activity 同样受 Android 11+
+             包可见性限制，未声明时 getPackageInfo 抛 NameNotFoundException，
+             该层兜底会静默失效。 -->
+        <package android:name="com.android.settings" />
     </queries>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- Legacy storage permissions only apply up to Android 12 (API 32). On 13+

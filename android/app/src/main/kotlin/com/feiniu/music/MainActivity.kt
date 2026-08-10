@@ -13,6 +13,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.content.pm.PackageManager
 import android.provider.MediaStore
 import android.provider.Settings
@@ -367,8 +370,8 @@ class MainActivity : AudioServiceActivity() {
             systemSettingsChannelName
         ).setMethodCallHandler { call, result ->
             when (call.method) {
-                "openSystemEqualizer" -> result.success(openSystemEqualizer())
-                "openMiSoundQuality" -> result.success(openMiSoundQuality())
+                "openSystemEqualizer" -> startFirstSurviving(equalizerCandidates(), result)
+                "openMiSoundQuality" -> startFirstSurviving(miSoundCandidates(), result)
                 else -> result.notImplemented()
             }
         }
@@ -391,71 +394,152 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
+    /** 本 Activity 是否在前台。用于判断跳转目标是否"站住了"（见 [startFirstSurviving]）。 */
+    @Volatile
+    private var isForeground: Boolean = true
+
+    /** 最近一次退到后台 / 回到前台的时刻（elapsedRealtime），用于估算目标页面的停留时长。 */
+    @Volatile
+    private var lastPauseAtMs: Long = 0L
+
+    @Volatile
+    private var lastResumeAtMs: Long = 0L
+
+    override fun onResume() {
+        super.onResume()
+        isForeground = true
+        lastResumeAtMs = SystemClock.elapsedRealtime()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isForeground = false
+        lastPauseAtMs = SystemClock.elapsedRealtime()
+    }
+
+    /** 单个候选跳转后，等待多久判定目标页面是否留住（毫秒）。 */
+    private val probeDelayMs: Long = 1100L
+
     /**
-     * 打开系统均衡器：优先 Android 官方 DISPLAY_AUDIO_EFFECT_CONTROL_PANEL
-     * （Spotify / Google Play Music 同款，非 HyperOS 设备有效）；HyperOS 3.0
-     * 无独立系统均衡器 intent，且均衡器内置于「音质音效」App（com.miui.misound）
-     * 的内部子页，故枚举其 Activity 直达均衡器；再回退到 App 主入口 / 系统设置。
-     * 全程静默，不弹提示。返回是否成功发起跳转。
+     * 目标页面停留超过此时长后我们才回到前台的，判定为"用户自己按了返回"而非
+     * 启动即闪退——此时应视为跳转成功，不再继续尝试后续候选去打扰用户。
      */
-    private fun openSystemEqualizer(): Boolean {
-        // 1) Android 官方标准音频效果控制面板（非 HyperOS 设备）
-        if (tryStart(Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL").apply {
-                putExtra("android.media.extra.PACKAGE_NAME", packageName)
-                putExtra("android.media.extra.CONTENT_TYPE", 0) // MUSIC
-            })) return true
-        // 2) 部分 OEM 的 EQUALIZER action
-        if (tryStart(Intent("android.media.action.EQUALIZER").apply {
-                putExtra("android.media.extra.PACKAGE_NAME", packageName)
-            })) return true
-        // 3) HyperOS 3.0：均衡器内置于「音质音效」App，枚举其内部 Activity
-        //    按关键字直达均衡器子页（跳过 LAUNCHER 主页）。
-        if (launchAppActivityByKeyword(
-                "com.miui.misound",
-                listOf("equalizer", "eq", "effect", "sound")
-            )
-        ) return true
-        // 4) 兜底：直接启动 App 主入口
-        if (launchPackage("com.miui.misound")) return true
-        // 5) 系统设置内自发现「均衡器 / 音质音效」Activity
-        if (launchSettingsActivityByKeyword(
-                listOf("equalizer", "soundquality", "soundenhancement", "misound", "soundeffect")
-            )
-        ) return true
-        // 6) 兜底：声音设置 → 主设置
-        if (tryStart(Intent(Settings.ACTION_SOUND_SETTINGS))) return true
-        if (tryStart(Intent(Settings.ACTION_SETTINGS))) return true
-        return false
+    private val userReturnThresholdMs: Long = 700L
+
+    /**
+     * 依次尝试候选 Intent，直到某一个**真正留在前台**为止。
+     *
+     * 背景：跨 OEM 直达系统音效子页只能靠运行时枚举类名猜测，而猜中的 Activity
+     * 可能因缺少前置参数在启动瞬间自行 finish()——用户看到的就是"点一下闪一下
+     * 又回到 App"。`startActivity` 此时并不抛异常，无法据此判断成败，旧实现因此
+     * 误判成功并终止候选链，永远卡在会闪退的那一个上。
+     *
+     * 故改为实测：每发起一个候选后等 [probeDelayMs]，若本 Activity 已退到后台，
+     * 说明目标页面站住了，成功收尾；若仍在前台，说明目标闪退，继续下一个候选。
+     * 候选链末尾放必定能留住的兜底（App 主入口 / 系统设置），保证不会一路闪到底。
+     */
+    private fun startFirstSurviving(candidates: List<Intent>, result: MethodChannel.Result) {
+        // 刻意用 Handler 而非协程：本模块未显式依赖 kotlinx-coroutines-android，
+        // Dispatchers.Main 不一定可用（缺失时会抛 "Module with the Main dispatcher
+        // had failed to initialize"）。Handler 零依赖且天然在主线程回 result。
+        val handler = Handler(Looper.getMainLooper())
+        fun step(index: Int) {
+            if (index >= candidates.size) {
+                runCatching { result.success(false) }
+                return
+            }
+            if (!tryStart(candidates[index])) {
+                step(index + 1) // 压根起不来（Activity 不存在 / 被拒），立刻试下一个
+                return
+            }
+            val startedAt = SystemClock.elapsedRealtime()
+            handler.postDelayed({
+                val survived = if (!isForeground) {
+                    // 我们仍在后台 = 目标页面站住了。
+                    true
+                } else {
+                    // 已回到前台：可能是目标闪退，也可能是用户看过页面后自己按了返回。
+                    // 用"离开前台的时长"区分——闪退通常只有几百毫秒，人手返回要更久。
+                    val leftAt = lastPauseAtMs
+                    val stayedMs = lastResumeAtMs - leftAt
+                    leftAt >= startedAt && stayedMs >= userReturnThresholdMs
+                }
+                if (survived) {
+                    runCatching { result.success(true) }
+                } else {
+                    step(index + 1)
+                }
+            }, probeDelayMs)
+        }
+        step(0)
     }
 
     /**
-     * 打开小米「音质音效 / Mi Sound」：HyperOS 3.0 的「音质音效」是独立 App
-     * (com.miui.misound) 的**内部子页**，直接 launchPackage 只会拉起 App 首页
+     * 系统均衡器候选链：官方音效面板 → OEM EQUALIZER action → HyperOS「音质音效」
+     * App 内的均衡器子页 → 该 App 主入口 → 系统设置内自发现 → 声音设置 / 主设置。
+     */
+    private fun equalizerCandidates(): List<Intent> {
+        val list = mutableListOf<Intent>()
+        // 1) Android 官方标准音频效果控制面板（Spotify 同款，非 HyperOS 设备有效）
+        list.add(Intent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL").apply {
+            putExtra("android.media.extra.PACKAGE_NAME", packageName)
+            putExtra("android.media.extra.CONTENT_TYPE", 0) // MUSIC
+        })
+        // 2) 部分 OEM 的 EQUALIZER action
+        list.add(Intent("android.media.action.EQUALIZER").apply {
+            putExtra("android.media.extra.PACKAGE_NAME", packageName)
+        })
+        // 3) HyperOS：均衡器是「音质音效」App 的内部子页，枚举直达
+        list.addAll(
+            appActivityCandidates(
+                "com.miui.misound",
+                listOf("equalizer", "audioeffect", "soundeffect")
+            )
+        )
+        // 4) 兜底：音质音效 App 主入口（必定能留住）
+        launchPackageIntent("com.miui.misound")?.let { list.add(it) }
+        // 5) 系统设置内自发现
+        list.addAll(
+            settingsActivityCandidates(
+                listOf("equalizer", "soundeffect", "soundquality", "soundenhancement", "misound")
+            )
+        )
+        // 6) 兜底：声音设置 → 主设置
+        list.add(Intent(Settings.ACTION_SOUND_SETTINGS))
+        list.add(Intent(Settings.ACTION_SETTINGS))
+        return list
+    }
+
+    /**
+     * 小米「音质音效 / Mi Sound」候选链：HyperOS 3.0 的「音质音效」是独立 App
+     * (com.miui.misound) 的**内部子页**，直接拉起主入口只会到 App 首页
      * （用户反馈"进入的不是正确的目录"）。故优先枚举该 App 内部 Activity 按
      * 关键字直达目标子页，跳过 LAUNCHER 主页；再回退到 App 主入口 / 系统设置。
-     * 全程静默。返回是否成功发起跳转。
      */
-    private fun openMiSoundQuality(): Boolean {
+    private fun miSoundCandidates(): List<Intent> {
+        val list = mutableListOf<Intent>()
         // 1) 枚举 com.miui.misound 内部 Activity，按关键字直达「音质音效」子页
         //    （跳过 LAUNCHER 主页，避免又回到 App 首页）。
-        if (launchAppActivityByKeyword(
+        list.addAll(
+            appActivityCandidates(
                 "com.miui.misound",
-                listOf("soundquality", "quality", "soundeffect", "effect", "misound", "sound")
+                listOf("soundquality", "soundeffect", "quality", "effect")
             )
-        ) return true
+        )
         // 2) 兜底：直接启动 App 主入口（用户在 App 内手动找音质音效）
-        if (launchPackage("com.miui.misound")) return true
+        launchPackageIntent("com.miui.misound")?.let { list.add(it) }
         // 3) 系统设置内自发现「音质音效 / 音效」Activity
-        if (launchSettingsActivityByKeyword(
-                listOf("soundquality", "soundenhancement", "misound", "soundeffect", "sound")
+        list.addAll(
+            settingsActivityCandidates(
+                listOf("soundquality", "soundenhancement", "misound", "soundeffect")
             )
-        ) return true
+        )
         // 4) 已知 MIUI action（部分版本有效）
-        if (tryStart(Intent("miui.settings.SOUND_QUALITY"))) return true
+        list.add(Intent("miui.settings.SOUND_QUALITY"))
         // 5) 兜底：声音设置 → 主设置
-        if (tryStart(Intent(Settings.ACTION_SOUND_SETTINGS))) return true
-        if (tryStart(Intent(Settings.ACTION_SETTINGS))) return true
-        return false
+        list.add(Intent(Settings.ACTION_SOUND_SETTINGS))
+        list.add(Intent(Settings.ACTION_SETTINGS))
+        return list
     }
 
     /** 尝试启动给定 Intent，成功返回 true；任何异常（含 Activity 不存在）静默吞掉。 */
@@ -470,92 +554,72 @@ class MainActivity : AudioServiceActivity() {
     }
 
     /**
-     * 通过包名启动某 App 的启动 Activity（launch intent）。
-     * 用于 HyperOS 3.0 的「音质音效」独立 App（com.miui.misound）。
-     * 返回是否成功（App 已安装且有启动入口）。
+     * 取某 App 的启动 Activity（launch intent），作为"必定能留住"的兜底候选。
+     * 用于 HyperOS 的「音质音效」独立 App（com.miui.misound）。
      */
-    private fun launchPackage(pkg: String): Boolean {
+    private fun launchPackageIntent(pkg: String): Intent? {
         return try {
-            val intent = packageManager.getLaunchIntentForPackage(pkg)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                true
-            } else {
-                false
-            }
+            packageManager.getLaunchIntentForPackage(pkg)
         } catch (_: Throwable) {
-            false
+            null
         }
     }
 
     /**
-     * 运行时枚举 com.android.settings 的所有 Activity，按关键字匹配类名，
-     * 启动第一个命中项。跨 MIUI/HyperOS 版本自适应，避免硬编码类名猜错。
-     * 若系统包可见性限制导致枚举为空，返回 false（由调用方兜底到声音设置）。
+     * 运行时枚举 com.android.settings 内的 Activity，按关键字生成候选。
+     * 跨 MIUI/HyperOS 版本自适应，避免硬编码类名猜错。
      */
-    private fun launchSettingsActivityByKeyword(keywords: List<String>): Boolean {
-        return try {
-            val pm = packageManager
-            val pi = pm.getPackageInfo(
-                "com.android.settings",
-                PackageManager.GET_ACTIVITIES
-            )
-            val kw = keywords.map { it.lowercase(Locale.ROOT) }
-            val name = pi.activities?.firstOrNull { ai ->
-                val cls = ai.name.lowercase(Locale.ROOT)
-                kw.any { cls.contains(it) }
-            }?.name
-            if (name != null) {
-                tryStart(Intent().apply { component = ComponentName("com.android.settings", name) })
-            } else {
-                false
-            }
-        } catch (_: Throwable) {
-            false
-        }
-    }
+    private fun settingsActivityCandidates(keywords: List<String>): List<Intent> =
+        appActivityCandidates("com.android.settings", keywords)
 
     /**
-     * 枚举指定包(package)内的所有 Activity，按关键字匹配类名启动第一个命中项。
-     * 用于 HyperOS 3.0 把「音质音效 / 均衡器」拆成独立 App(com.miui.misound)的
-     * 内部子页、但各子页 Activity 类名随版本变化的场景：不硬编码类名，运行时
-     * 自适应。会跳过明显是 App 主页（类名含 main/splash/launch/home/launcher）
-     * 的 LAUNCHER Activity，避免又回到 App 首页。命中多个时按关键字列表顺序
-     * （越靠前越具体）优先。包不可见（Android 11+ 包可见性）或无匹配时返回 false。
+     * 枚举指定包内 **exported** 的 Activity，按关键字匹配**简单类名**，返回按
+     * 优先级排序的显式 Intent 候选列表（最多 [maxActivityCandidates] 个）。
      *
-     * 注意：枚举其它 App 的 Activity 需该包对当前应用可见，故 AndroidManifest
-     * 的 <queries> 已声明 com.miui.misound。
+     * 用于 HyperOS 把「音质音效 / 均衡器」拆成独立 App(com.miui.misound) 的内部
+     * 子页、且各子页类名随版本变化的场景：不硬编码类名，运行时自适应。
+     *
+     * ⚠️ 必须用**简单类名**匹配。旧实现用完整类名 `ai.name`，而包名
+     * `com.miui.mi`**`sound`** 本身就含关键字 "sound"，导致该 App 的每一个
+     * Activity 都被判定命中、筛选完全失效，最终随机挑到一个需要前置参数的内部
+     * 子页，启动即 finish —— 表现为"点一下闪一下没进页面"。关键字同理不能过短
+     * （旧的 "eq" 会误命中 Request / Sequence 之类）。
+     *
+     * 会跳过明显是 App 主页（类名含 main/splash/launch/home/launcher）的
+     * Activity，避免直达变成回首页；主入口另由 [launchPackageIntent] 兜底。
+     * 非 exported 的 Activity 启动必被系统拒绝，直接排除。
+     *
+     * 注意：枚举其它 App 的 Activity 需该包对本应用可见，AndroidManifest 的
+     * <queries> 已声明 com.miui.misound 与 com.android.settings。
      */
-    private fun launchAppActivityByKeyword(pkg: String, keywords: List<String>): Boolean {
+    private fun appActivityCandidates(pkg: String, keywords: List<String>): List<Intent> {
         return try {
-            val pm = packageManager
-            val pi = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
+            val pi = packageManager.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
             val kw = keywords.map { it.lowercase(Locale.ROOT) }
             val launcherLike = setOf("main", "splash", "launch", "home", "launcher")
-            val matched = pi.activities?.filter { ai ->
-                val cls = ai.name.lowercase(Locale.ROOT)
-                kw.any { cls.contains(it) }
-            } ?: emptyList()
-            // 优先排除 App 主页（LAUNCHER）Activity，它们是"App 首页"而非目标子页。
-            val preferred = matched.filter { ai ->
-                val simple = ai.name.substringAfterLast('.').lowercase(Locale.ROOT)
-                launcherLike.none { simple.contains(it) }
-            }
-            val chosen = (if (preferred.isNotEmpty()) preferred else matched).minByOrNull { ai ->
-                // 命中关键字里排在最前（最具体）的优先。
-                val cls = ai.name.lowercase(Locale.ROOT)
-                kw.indexOfFirst { cls.contains(it) }.coerceAtLeast(0)
-            }
-            if (chosen != null) {
-                tryStart(Intent().apply { component = ComponentName(pkg, chosen.name) })
-            } else {
-                false
-            }
+            pi.activities
+                ?.asSequence()
+                ?.filter { it.exported }
+                ?.mapNotNull { ai ->
+                    // 只看简单类名，避开包名带来的误命中。
+                    val simple = ai.name.substringAfterLast('.').lowercase(Locale.ROOT)
+                    if (launcherLike.any { simple.contains(it) }) return@mapNotNull null
+                    // 命中关键字里排在最前（最具体）的优先。
+                    val rank = kw.indexOfFirst { simple.contains(it) }
+                    if (rank < 0) null else rank to ai.name
+                }
+                ?.sortedBy { it.first }
+                ?.take(maxActivityCandidates)
+                ?.map { (_, name) -> Intent().apply { component = ComponentName(pkg, name) } }
+                ?.toList()
+                ?: emptyList()
         } catch (_: Throwable) {
-            false
+            emptyList()
         }
     }
+
+    /** 单个包内最多取几个 Activity 候选，避免全部闪退时一路闪太多次。 */
+    private val maxActivityCandidates: Int = 3
 
     /** 单一实例持有，保证歌词行去重 / 节流状态在多次 MethodChannel 调用间保持。 */
     private val islandLyricNotification: IslandLyricNotification by lazy {

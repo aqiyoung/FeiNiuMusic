@@ -60,11 +60,31 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   /// 小米 / 三星 / 一加等 OEM 均已适配。仅 Android 平台有效。
   Future<void> _openSystemEqualizer() async {
     if (!Platform.isAndroid) return;
+    bool ok = false;
     try {
-      await _systemSettings.invokeMethod<bool>('openSystemEqualizer');
+      ok =
+          await _systemSettings.invokeMethod<bool>('openSystemEqualizer') ??
+          false;
     } catch (_) {
-      // 静默失败——部分定制 ROM 可能未注册此 intent
+      // 部分定制 ROM 可能未注册此 intent
     }
+    // 原生侧会逐个候选试探并自动回落，全部失败才返回 false。
+    // 此时若仍静默，用户点了毫无反应会以为是卡死，故给出明确提示。
+    if (ok || !mounted) return;
+    _toast('未找到系统均衡器，请到「设置 → 声音」中查找');
+  }
+
+  /// 底部轻提示。
+  void _toast(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
   }
 
   /// 打开 Mi Sound 音质音效（MIUI/HyperOS → 声音与振动 → **音质音效**）。
@@ -73,11 +93,16 @@ class _AudioEffectsSettingsPageState extends State<AudioEffectsSettingsPage> {
   /// 直接到达「音质音效」页面，不停留在上一级「声音与振动」。
   Future<void> _openMiSoundSettings() async {
     if (!Platform.isAndroid) return;
+    bool ok = false;
     try {
-      await _systemSettings.invokeMethod<bool>('openMiSoundQuality');
+      ok =
+          await _systemSettings.invokeMethod<bool>('openMiSoundQuality') ??
+          false;
     } catch (_) {
-      // 静默失败
+      // 非小米设备无此 App
     }
+    if (ok || !mounted) return;
+    _toast('未找到「音质音效」，该功能仅 MIUI / HyperOS 提供');
   }
 
   @override
