@@ -8,18 +8,20 @@ import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../app/services/companion/companion_error.dart';
 import '../../app/services/companion/metadata_companion_service.dart';
 import '../../app/services/feiniu/api_client.dart';
 import '../../app/services/plugin/plugin_result_parser.dart';
 import '../../app/services/song_match/song_match_service.dart';
 import '../../app/state/settings_lyric_companion.dart';
+import '../../app/utils/image_crop_helper.dart';
 import '../../components/index.dart';
 import '../songs/song_edit_page.dart';
 
 /// 歌手/专辑编辑页：修改名称 + 封面图（本地上传或联网搜索）。
 ///
-/// 写入走 FnMusicLyricsEditor 配套服务（`/cover` 写封面、`/entity` 改名），
-/// 仅非中继直连 + 已启用配套编辑服务（[LyricCompanionSettings.enabled]）时可用。
+/// 写入走 FnMusicEnhance 服务端增强（`/cover` 写封面、`/entity` 改名），
+/// 仅非中继直连 + 已启用服务端增强（[LyricCompanionSettings.enabled]）时可用。
 /// 保存成功返回新名称（null = 未修改名称）。
 class ArtistAlbumEditPage extends StatefulWidget {
   final EntityEditKind kind;
@@ -101,11 +103,10 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
     final file = result?.files.first;
     if (file?.path == null || !mounted) return;
 
-    final cropped = await ImageCropper().cropImage(
+    final cropped = await cropCoverImage(
       sourcePath: file!.path!,
-      compressFormat: ImageCompressFormat.png,
-      compressQuality: 95,
-      aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+      ratioX: 1,
+      ratioY: 1,
       uiSettings: [
         AndroidUiSettings(
           toolbarTitle: '裁剪封面',
@@ -139,7 +140,13 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
 
     setState(() => _searching = true);
     try {
-      final covers = await SongMatchService.instance.searchCovers(keyword);
+      // 歌手 → search_type=1，专辑 → search_type=2（QQ 音乐数据源支持）
+      final searchType = switch (widget.kind) {
+        EntityEditKind.artist => 1,
+        EntityEditKind.album => 2,
+      };
+      final covers = await SongMatchService.instance
+          .searchCovers(keyword, searchType: searchType);
       if (!mounted) return;
       if (covers.isEmpty) {
         AppToast.show(context, '未搜索到封面，请检查数据源插件', type: ToastType.error);
@@ -203,9 +210,9 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
     if (_saving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    // 配套服务可用性门槛：未启用配套编辑服务（未配置密钥）时禁用
+    // 服务端增强可用性门槛：未启用时禁用
     if (!LyricCompanionSettings.enabled.value) {
-      AppToast.show(context, '请先在设置 → 元数据匹配启用配套编辑服务', type: ToastType.error);
+      AppToast.show(context, '请先在设置 → 元数据匹配启用服务端增强', type: ToastType.error);
       return;
     }
     if (!_companion.available) {
@@ -242,7 +249,11 @@ class _ArtistAlbumEditPageState extends State<ArtistAlbumEditPage> {
     } catch (e) {
       debugPrint('[ArtistAlbumEditPage] save error: $e');
       if (mounted) {
-        AppToast.show(context, '保存失败：$e', type: ToastType.error);
+        AppToast.show(
+          context,
+          '保存失败：${friendlyCompanionError(e)}',
+          type: ToastType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

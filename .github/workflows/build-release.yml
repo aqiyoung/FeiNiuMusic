@@ -11,6 +11,33 @@ permissions:
   contents: write
 
 jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: 提取版本号
+        shell: powershell
+        run: |
+          $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$' | Select-Object -First 1
+          $full = $line.Matches[0].Groups[1].Value.Trim()
+          $ver = $full.Split('+')[0]
+          echo "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: 构建并打包 Windows 绿色版
+        shell: powershell
+        run: .\scripts\package_windows.ps1 -Build
+      - name: 上传 Windows 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            build/installer/FeiNiuMusic-Windows-*.zip
+            pubspec.yaml
+
   build-android:
     runs-on: ubuntu-latest
     steps:
@@ -25,44 +52,26 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      # 签名密钥（可选）：
-      # 若仓库配置了 ANDROID_KEYSTORE_BASE64 等 secret，则解码出 release.p12 (PKCS12)
-      # 并把 SIGNING_* 注入后续步骤环境，产出「正式签名」包（可上架 / 覆盖升级）。
-      # 若未配置，则脚本自动跳过 —— build.gradle 会回退到 debug 签名，
-      # 产出可直接安装测试的 APK（不能上架，也不能覆盖正式签名安装）。
-      # 注意：secrets 不能写在 step 的 if: 表达式里（GitHub 限制），故在脚本内判断。
-      - name: Set up signing keystore (optional)
+      - run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 is missing"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.p12
-            {
-              echo "SIGNING_STORE_FILE=release.p12"
-              echo "SIGNING_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
-              echo "SIGNING_KEY_ALIAS=$ANDROID_KEY_ALIAS"
-              echo "SIGNING_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
-            } >> "$GITHUB_ENV"
-            echo "::notice::release signing enabled (正式签名)"
-          else
-            echo "::notice::未配置 keystore secret —— 将产出 debug 签名 APK（可直接安装测试）"
-          fi
-
       - run: flutter pub get
-
-      - name: Compute version
-        run: |
+      - run: |
           FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
           VERSION=${FULL_VERSION%%+*}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-
       # 1) 正式包：默认包名 com.feiniu.music，三个 CPU 架构全部保留
       - run: flutter build apk --release --split-per-abi
-
+        env:
+          SIGNING_STORE_FILE: release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - run: |
           mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
              FeiNiuMusic-v${VERSION}-arm64-v8a.apk
@@ -70,28 +79,89 @@ jobs:
              FeiNiuMusic-v${VERSION}-armeabi-v7a.apk
           mv build/app/outputs/flutter-apk/app-x86_64-release.apk \
              FeiNiuMusic-v${VERSION}-x86_64.apk
-
       # 2) 汽水音乐兼容包（非官方）：applicationId 覆盖为 com.luna.music，仅 arm64。
       #    用于鸿蒙 4/6、iQOO、VIVO 的播控中心显示汽水音乐控制（见 README 声明）。
+      #    media_kit 媒体库（否则包体会大 ~13MB）。
       - run: flutter build apk --release --split-per-abi --target-platform android-arm64 --android-project-arg applicationIdOverride=com.luna.music
-
+        env:
+          SIGNING_STORE_FILE: release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - run: |
           mv build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
              FeiNiuMusic-v${VERSION}-z-luna-arm64-v8a.apk
+      # 3) 配套服务端增强应用 FPK：从 FnMusicEnhance 仓库拉取最新 release 产物。
+      #    配套仓库尚无 release 时跳过（后续发布自然附带）。
+      - name: Download companion FPK
+        run: |
+          echo "从 FnMusicEnhance 拉取最新 release 的 fpk ..."
+          # 用 GitHub API 获取最新 release 资产 URL（仓库公开即可，无需 token）
+          ASSETS_JSON=$(curl -s \
+            https://api.github.com/repos/kuilei0926/FnMusicEnhance/releases/latest)
+          # 提取 fpk 资产下载地址（jq 不在则用 grep/sed 兜底）
+          FPK_URL=$(echo "$ASSETS_JSON" | jq -r '.assets[]?.browser_download_url | select(test("\\.fpk$"))' 2>/dev/null | head -n1)
+          if [ -z "$FPK_URL" ]; then
+            FPK_URL=$(echo "$ASSETS_JSON" \
+              | grep -o '"browser_download_url": *"[^"]*\.fpk"' \
+              | head -n1 | sed 's/.*: *"//; s/"$//')
+          fi
+          if [ -z "$FPK_URL" ]; then
+            echo "未找到 FnMusicEnhance 的 fpk release 产物，跳过配套应用"
+            exit 0
+          fi
+          # 保留配套 release 的原始文件名（含配套自身版本号，而非本 App 版本）
+          FPK_NAME=$(basename "$FPK_URL")
+          if [ -z "$FPK_NAME" ] || [ "${FPK_NAME%.fpk}" = "$FPK_NAME" ]; then
+            FPK_NAME="FnMusicEnhance-${VERSION}.fpk"
+          fi
+          echo "下载: $FPK_URL"
+          echo "保存为: $FPK_NAME"
+          curl -sL -o "$FPK_NAME" "$FPK_URL"
+          ls -la "$FPK_NAME"
+      - name: 上传 Android 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: |
+            FeiNiuMusic-v*.apk
+            FnMusicEnhance-*.fpk
+            pubspec.yaml
 
-      - run: |
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-android]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 提取版本号
+        run: |
+          FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          VERSION=${FULL_VERSION%%+*}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: 生成 release 说明
+        run: |
           git log -1 --pretty=format:"- %s%n%b" > release_notes.txt
           if [ ! -s release_notes.txt ]; then
             echo "- ${GITHUB_SHA}" > release_notes.txt
           fi
-
+      - name: 下载 Windows 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: windows-artifact/
+      - name: 下载 Android 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: android-build
+          path: android-artifact/
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: v${{ env.VERSION }}
           body_path: release_notes.txt
           files: |
-            FeiNiuMusic-v${{ env.VERSION }}-arm64-v8a.apk
-            FeiNiuMusic-v${{ env.VERSION }}-armeabi-v7a.apk
-            FeiNiuMusic-v${{ env.VERSION }}-x86_64.apk
-            FeiNiuMusic-v${{ env.VERSION }}-z-luna-arm64-v8a.apk
+            android-artifact/FeiNiuMusic-v*.apk
+            android-artifact/FnMusicEnhance-*.fpk
+            windows-artifact/FeiNiuMusic-Windows-*.zip
