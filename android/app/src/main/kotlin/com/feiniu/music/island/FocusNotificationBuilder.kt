@@ -137,6 +137,10 @@ class FocusNotificationBuilder(
         json.put("title", uiState.notificationTitleLeft)
         // OS3 使用 notificationTitleRight 作为 content（当前歌词行）
         json.put("content", uiState.notificationTitleRight)
+        // 卡片左上角应用 LOGO：引用 miui.focus.pics 里的彩色应用图标
+        // （见 IslandLyricNotification.notifyFocus）。不指定时系统会回退到
+        // 被 tint 的 smallIcon，显示为纯色块。
+        json.put("pic", "miui.focus.pic_logo")
 
         if (uiState.songInfoHighlightColorEnabled) {
             val hex = getColorHex(uiState.color)

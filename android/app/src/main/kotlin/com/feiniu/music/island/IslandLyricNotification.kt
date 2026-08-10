@@ -213,12 +213,23 @@ class IslandLyricNotification(private val context: Context) {
             extras.putInt("mipush_focus_color", uiState.color)
         }
 
-        // 图片资源：大岛左侧封面 + 小图标兜底
+        // 图片资源：大岛左侧封面 + 卡片应用 LOGO
         val picsBundle = Bundle()
         val albumIcon = loadCoverIcon(coverPath)
         if (albumIcon != null) {
             picsBundle.putParcelable("miui.focus.pic_album", albumIcon)
         }
+        // 卡片（baseInfo）左上角应用 LOGO：显式放入彩色应用图标。
+        // 不依赖 smallIcon——smallIcon 必须是单色，被系统 tint 后只会显示成
+        // 纯色块（紫块）。焦点通知 JSON 的 baseInfo.pic 引用此 key，让
+        // HyperOS 渲染出彩色飞牛音乐图标。
+        picsBundle.putParcelable(
+            "miui.focus.pic_logo",
+            android.graphics.drawable.Icon.createWithResource(
+                context,
+                R.mipmap.ic_launcher,
+            ),
+        )
         extras.putBundle("miui.focus.pics", picsBundle)
 
         // 外发光光圈效果（参考 HyperIsland IslandOuterGlowHook 的注入方式）：
@@ -229,7 +240,10 @@ class IslandLyricNotification(private val context: Context) {
         extras.putString("miui.bigIsland.effect.src", "outer_glow")
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            // smallIcon 仅用于状态栏/通知栏规范小图标，必须是单色（系统会
+            // 按主题 tint）。彩色应用图标已通过 miui.focus.pic_logo + baseInfo.pic
+            // 供给卡片 LOGO，避免被 tint 成纯色块。
+            .setSmallIcon(R.drawable.ic_notification)
             .setOnlyAlertOnce(true)
             .setCustomContentView(null)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -311,7 +325,7 @@ class IslandLyricNotification(private val context: Context) {
                 } else {
                     androidx.core.graphics.drawable.IconCompat.createWithResource(
                         context,
-                        R.mipmap.ic_launcher
+                        R.drawable.ic_notification
                     )
                 }
             )
