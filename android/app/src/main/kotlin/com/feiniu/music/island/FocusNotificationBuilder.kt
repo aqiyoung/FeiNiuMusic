@@ -86,17 +86,15 @@ class FocusNotificationBuilder(
         if (uiState.hasCover) {
             // 封面 + 文本
             imageTextLeft.put("picInfo", buildPicInfo(1, "miui.focus.pic_album"))
-            val textInfoLeft = JSONObject()
-            textInfoLeft.put("title", uiState.islandTitleLeft)
-            textInfoLeft.put("showHighlightColor", uiState.highlightColorEnabled)
-            imageTextLeft.put("textInfo", textInfoLeft)
         } else {
-            // 纯文本模式（无封面）：左侧只放歌词前半段
-            val textInfoLeft = JSONObject()
-            textInfoLeft.put("title", uiState.islandTitleLeft)
-            textInfoLeft.put("showHighlightColor", uiState.highlightColorEnabled)
-            imageTextLeft.put("textInfo", textInfoLeft)
+            // 无封面：用应用 LOGO 兜底，避免左侧空白
+            imageTextLeft.put("picInfo", buildPicInfo(1, "miui.focus.pic_logo"))
         }
+        val textInfoLeft = JSONObject()
+        textInfoLeft.put("title", uiState.islandTitleLeft)
+        textInfoLeft.put("showHighlightColor", uiState.highlightColorEnabled)
+        imageTextLeft.put("textInfo", textInfoLeft)
+
         json.put("imageTextInfoLeft", imageTextLeft)
 
         // 大岛主文本区（右侧）：当前歌词后半段
@@ -110,8 +108,10 @@ class FocusNotificationBuilder(
 
     private fun buildSmallIslandArea(): JSONObject {
         val json = JSONObject()
-        // 小岛胶囊：无封面图（首版精简），仅进度环
+        // 小岛胶囊：左侧应用 LOGO + 进度环
         val combinePicInfo = JSONObject()
+        // 胶囊左侧显示彩色应用 LOGO（引用 miui.focus.pics 里的 pic_logo）
+        combinePicInfo.put("picInfo", buildPicInfo(1, "miui.focus.pic_logo"))
         if (showProgress) {
             val progressInfo = JSONObject()
             progressInfo.put("progress", uiState.progress)
