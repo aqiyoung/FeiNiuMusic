@@ -321,16 +321,13 @@ class IslandLyricNotification(private val context: Context) {
         // 封面 bitmap 仅用于下方 setLargeIcon（通知卡片右侧）；胶囊 smallIcon 固定用应用图标。
         val albumIcon = loadCoverIcon(coverPath)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE)
-            // 灵动胶囊左上角要求 smallIcon 是「可被系统裁剪成圆形的资源图标」。
-            // 用歌曲封面 bitmap 作 smallIcon 时，HyperOS 展开视图无法将其裁成圆形，
-            // 会渲染为空白圆圈（见 786082a）。固定使用应用图标资源，胶囊/展开视图
-            // 都能稳定显示 LOGO；封面仍通过下方的 setLargeIcon 显示在通知卡片右侧。
-            .setSmallIcon(
-                androidx.core.graphics.drawable.IconCompat.createWithResource(
-                    context,
-                    R.mipmap.ic_launcher,
-                )
-            )
+            // smallIcon 必须是单色透明矢量：Android/HyperOS 会把通知 smallIcon
+            // 按主题 tint、只取 alpha 通道。之前用全彩 R.mipmap.ic_launcher，
+            // 展开卡片里被 tint 成一坨纯色块（左上角 LOGO 异常的真因，见 786082a
+            // 把封面 bitmap 换成 ic_launcher 后遗留的问题）。改用单色 ic_notification
+            // 后展开视图显示正常的应用图标轮廓；HyperOS 胶囊仍按应用图标全彩渲染。
+            // 封面通过下方 setLargeIcon 显示在通知卡片右侧。
+            .setSmallIcon(R.drawable.ic_notification)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCustomContentView(null)
