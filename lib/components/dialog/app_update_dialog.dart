@@ -20,27 +20,18 @@ Future<void> _openUrl(BuildContext context, String url) async {
 /// 用 gh-proxy 包裹 GitHub 链接, 国内/弱网用户直连失败时兜底.
 String _proxyUrl(String url) => 'https://gh-proxy.com/$url';
 
-/// 优先用 GitHub App 私有 scheme 直接调起 App 跳到发布页；
-/// 调不起（未装 App / 不支持 scheme）回退到原始 https
-/// （Android App Link / iOS Universal Link 仍会拉起 GitHub App，否则浏览器）。
+/// 优先用 GitHub App 打开发布页。
+/// GitHub 移动端靠 App Link / Universal Link 机制：标准 https://github.com/...
+/// 链接会被系统直接路由到已安装的 GitHub App（若已装），否则回退外部浏览器。
 Future<void> _openGitHubApp(BuildContext context, String releaseUrl) async {
-  final schemeUrl = releaseUrl.replaceFirst(
-    'https://github.com/',
-    'github://repositories/',
-  );
-  if (schemeUrl.startsWith('github://')) {
-    try {
-      if (await canLaunchUrl(Uri.parse(schemeUrl))) {
-        final ok = await launchUrl(
-          Uri.parse(schemeUrl),
-          mode: LaunchMode.externalApplication,
-        );
-        if (ok) return;
-      }
-    } catch (_) {
-      // 未安装 GitHub App 或不支持该 scheme，走回退
+  final uri = Uri.parse(releaseUrl);
+  // externalNonBrowserApplication 让系统优先把链接交给 GitHub App（App Link），
+  // 而非默认浏览器。未安装 App 时 launchUrl 返回 false，再回退浏览器。
+  try {
+    if (await canLaunchUrl(uri)) {
+      if (await launchUrl(uri, mode: LaunchMode.externalNonBrowserApplication)) return;
     }
-  }
+  } catch (_) {}
   await _openUrl(context, releaseUrl);
 }
 
