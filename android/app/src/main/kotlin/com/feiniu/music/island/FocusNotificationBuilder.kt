@@ -79,17 +79,15 @@ class FocusNotificationBuilder(
     private fun buildBigIslandArea(): JSONObject {
         val json = JSONObject()
 
-        // 大岛左侧内容：封面图（picInfo）+ 歌词前半段（textInfo）组合
+        // 大岛左侧内容：应用 LOGO（picInfo）+ 歌词前半段（textInfo）组合
+        // 展开窗口左上角固定显示应用 LOGO，与胶囊（小岛）保持一致：
+        // 1) 用户期望此处是应用 LOGO 而非封面；
+        // 2) 封面 bitmap 在 bigIslandArea.imageTextInfoLeft 里会被按密度缩放/
+        //    裁切，渲染成空白圆圈（与 pic_logo 同源的 loadAppLogoBitmap() 已解决）。
+        // 封面仍经 miui.focus.pic_album 用于 AOD（aodPic）等位置，不在此处展示。
         val imageTextLeft = JSONObject()
         imageTextLeft.put("type", 1)
-
-        if (uiState.hasCover) {
-            // 封面 + 文本
-            imageTextLeft.put("picInfo", buildPicInfo(1, "miui.focus.pic_album"))
-        } else {
-            // 无封面：用应用 LOGO 兜底，避免左侧空白
-            imageTextLeft.put("picInfo", buildPicInfo(1, "miui.focus.pic_logo"))
-        }
+        imageTextLeft.put("picInfo", buildPicInfo(1, "miui.focus.pic_logo"))
         val textInfoLeft = JSONObject()
         textInfoLeft.put("title", uiState.islandTitleLeft)
         textInfoLeft.put("showHighlightColor", uiState.highlightColorEnabled)
