@@ -1,38 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../app/services/app_update_core.dart';
 import '../../app/services/app_update_service.dart';
 import '../feedback/app_toast.dart';
 
-Future<void> _openUrl(BuildContext context, String url) async {
-  final uri = Uri.parse(url);
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } else if (context.mounted) {
-    await Clipboard.setData(ClipboardData(text: url));
-    if (context.mounted) {
-      AppToast.show(context, '无法打开浏览器，地址已复制');
-    }
+/// 跳转发布页 —— 统一走 [AppUpdateCore.openRelease]:
+/// GitHub App 优先（App Link / Universal Link）→ 系统浏览器 → 复制链接兜底。
+/// sanyelive / synapse 共用同一份实现，三端行为完全一致。
+Future<void> _openRelease(BuildContext context, String url) async {
+  final result = await AppUpdateService.core.openRelease(context, url);
+  if (result == OpenReleaseResult.copied && context.mounted) {
+    AppToast.show(context, '无法打开 GitHub，地址已复制');
   }
-}
-
-/// 用 gh-proxy 包裹 GitHub 链接, 国内/弱网用户直连失败时兜底.
-String _proxyUrl(String url) => 'https://gh-proxy.com/$url';
-
-/// 优先用 GitHub App 打开发布页。
-/// GitHub 移动端靠 App Link / Universal Link 机制：标准 https://github.com/...
-/// 链接会被系统直接路由到已安装的 GitHub App（若已装），否则回退外部浏览器。
-Future<void> _openGitHubApp(BuildContext context, String releaseUrl) async {
-  final uri = Uri.parse(releaseUrl);
-  // externalNonBrowserApplication 让系统优先把链接交给 GitHub App（App Link），
-  // 而非默认浏览器。未安装 App 时 launchUrl 返回 false，再回退浏览器。
-  try {
-    if (await canLaunchUrl(uri)) {
-      if (await launchUrl(uri, mode: LaunchMode.externalNonBrowserApplication)) return;
-    }
-  } catch (_) {}
-  await _openUrl(context, releaseUrl);
 }
 
 /// Polished "update available" prompt. Shown for both manual checks and the
@@ -101,7 +81,7 @@ Future<void> showUpdateFailedDialog(BuildContext context) {
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
-            _openGitHubApp(context, AppUpdateService.releasePageUrl);
+            _openRelease(context, AppUpdateService.releasePageUrl);
           },
           child: const Text('手动打开'),
         ),
@@ -261,9 +241,9 @@ class _UpdateAvailableDialog extends StatelessWidget {
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context);
-                      _openUrl(
+                      _openRelease(
                         context,
-                        _proxyUrl(
+                        AppUpdateService.core.proxyUrl(
                           info.releaseUrl ?? AppUpdateService.releasePageUrl,
                         ),
                       );
@@ -274,7 +254,7 @@ class _UpdateAvailableDialog extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      _openGitHubApp(
+                      _openRelease(
                         context,
                         info.releaseUrl ?? AppUpdateService.releasePageUrl,
                       );

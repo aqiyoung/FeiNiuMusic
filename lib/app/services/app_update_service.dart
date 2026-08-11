@@ -1,6 +1,15 @@
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'app_update_core.dart';
+
+/// 飞牛音乐的更新检查 —— 检测逻辑全部委托统一引擎 [AppUpdateCore]
+/// (lib/app/services/app_update_core.dart, sanyelive / FeiNiuMusic / synapse 共用).
+///
+/// v1.x 之前这里是直连 api.github.com 的单路径实现: 有 VPN / 海外网络能用,
+/// 但国内移动宽带直连被墙时会静默判定"已是最新". 换成统一引擎后自动获得
+/// [gh-proxy 代理 → 直连 → jsDelivr meta] 三层可达路径.
+
 class AppUpdateInfo {
   final String latestVersion;
   final String? releaseName;
@@ -9,6 +18,9 @@ class AppUpdateInfo {
   final bool hasUpdate;
   final bool isCritical;
 
+  /// 所有数据源都失败 (网络不可达) —— 与"已是最新"区分开, 手动检查时可提示用户.
+  final bool failed;
+
   const AppUpdateInfo({
     required this.latestVersion,
     required this.hasUpdate,
@@ -16,6 +28,7 @@ class AppUpdateInfo {
     this.releaseUrl,
     this.releaseNotes,
     this.isCritical = false,
+    this.failed = false,
   });
 }
 
@@ -24,10 +37,19 @@ class AppUpdateService {
 
   static final AppUpdateService instance = AppUpdateService._();
 
+  static const AppUpdateConfig config = AppUpdateConfig(
+    owner: 'aqiyoung',
+    repo: 'FeiNiuMusic',
+    // 仓库没有 meta 分支, 关掉 jsDelivr 兜底避免无谓等待.
+    useMetaFallback: false,
+  );
+
+  /// 统一更新引擎实例 —— 检测 + 跳转发布页都用它, 保证与另两个 App 行为一致.
+  static final AppUpdateCore core = AppUpdateCore(config);
+
+  /// 保持 const —— 调用方有 `const ClipboardData(text: releasePageUrl)` 的用法.
   static const String releasePageUrl =
       'https://github.com/aqiyoung/FeiNiuMusic/releases/latest';
-  static const String latestReleaseApiUrl =
-      'https://api.github.com/repos/aqiyoung/FeiNiuMusic/releases/latest';
 
   final Dio _dio = Dio(
     BaseOptions(
@@ -35,6 +57,23 @@ class AppUpdateService {
       receiveTimeout: const Duration(seconds: 8),
     ),
   );
+
+  /// 把 Dio 适配成引擎需要的取数函数; 非 200 全放行, 由引擎切换下一条路径.
+  AppUpdateFetch get _fetch => (url, headers) async {
+        final resp = await _dio.get<dynamic>(
+          url,
+          options: Options(
+            responseType: ResponseType.plain,
+            receiveTimeout: const Duration(seconds: 10),
+            headers: headers,
+            validateStatus: (_) => true,
+          ),
+        );
+        return AppUpdateHttpResponse(
+          resp.statusCode ?? 0,
+          resp.data?.toString() ?? '',
+        );
+      };
 
   String? _cachedVersion;
 
@@ -56,83 +95,22 @@ class AppUpdateService {
   }
 
   Future<AppUpdateInfo> checkLatest(String currentVersion) async {
-    try {
-      final response = await _dio.get(
-        latestReleaseApiUrl,
-        options: Options(
-          headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'FeiNiuMusic',
-          },
-        ),
-      );
-      final data = response.data as Map<String, dynamic>?;
-      if (data == null) {
-        return AppUpdateInfo(latestVersion: currentVersion, hasUpdate: false);
-      }
-
-      final tagName = (data['tag_name'] as String? ?? '').trim();
-      final latestName = tagName.startsWith('v') || tagName.startsWith('V')
-          ? tagName.substring(1)
-          : tagName;
-      final releaseName = data['name'] as String?;
-      final body = data['body'] as String?;
-      final htmlUrl = data['html_url'] as String?;
-
-      final hasUpdate = _compareVersions(latestName, currentVersion) > 0;
-      final isCritical = _isCriticalRelease(body ?? '');
+    final result = await core.check(_fetch, currentVersion);
+    if (result == null) {
+      // 全部数据源失败 → 不谎报"已是最新".
       return AppUpdateInfo(
-        latestVersion: latestName,
-        hasUpdate: hasUpdate,
-        releaseName: releaseName,
-        releaseUrl: htmlUrl ?? releasePageUrl,
-        releaseNotes: body,
-        isCritical: isCritical,
+        latestVersion: currentVersion,
+        hasUpdate: false,
+        failed: true,
       );
-    } catch (e) {
-      return AppUpdateInfo(latestVersion: currentVersion, hasUpdate: false);
     }
-  }
-
-  String _normalizeVersion(String version) {
-    final value = version.trim();
-    if (value.startsWith('v') || value.startsWith('V')) {
-      return value.substring(1);
-    }
-    return value;
-  }
-
-  /// 与 sanyelive 一致的 critical 判定: release body 首非空行含
-  /// "**P0**" 或 "**critical**" (case-insensitive) → 重要更新, 弹窗强制升级
-  /// (不显示"稍后"). 仅在发版时在正文首行显式打标记才生效.
-  static bool _isCriticalRelease(String body) {
-    final firstLine = body
-        .split('\n')
-        .map((l) => l.trim())
-        .firstWhere((l) => l.isNotEmpty, orElse: () => '');
-    final lower = firstLine.toLowerCase();
-    return lower.contains('**p0**') || lower.contains('**critical**');
-  }
-
-  int _compareVersions(String a, String b) {
-    // Compare only the release part (major.minor.patch); ignore any build or
-    // prerelease suffix so maintenance builds (e.g. 1.3.1-2 vs 1.3.1) don't
-    // register as a new version.
-    List<int> release(String v) {
-      var s = _normalizeVersion(v);
-      final cut = s.indexOf(RegExp(r'[+\-]'));
-      if (cut >= 0) s = s.substring(0, cut);
-      return s.split('.').map((e) => int.tryParse(e.trim()) ?? 0).toList();
-    }
-
-    final left = release(a);
-    final right = release(b);
-    final length = left.length > right.length ? left.length : right.length;
-    for (var i = 0; i < length; i++) {
-      final l = i < left.length ? left[i] : 0;
-      final r = i < right.length ? right[i] : 0;
-      if (l != r) return l.compareTo(r);
-    }
-    return 0;
+    return AppUpdateInfo(
+      latestVersion: result.latestVersion,
+      hasUpdate: result.hasUpdate,
+      releaseName: result.releaseName,
+      releaseUrl: result.releaseUrl,
+      releaseNotes: result.releaseNotes,
+      isCritical: result.isCritical,
+    );
   }
 }

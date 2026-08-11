@@ -53,6 +53,10 @@ class _VersionInfoPageState extends State<VersionInfoPage> {
       setState(() => _updateInfo = info);
       if (info.hasUpdate) {
         await showAppUpdateDialog(context, info: info, currentVersion: current);
+      } else if (info.failed) {
+        // 所有数据源都不可达（国内直连被墙 + 代理也失败）→ 如实告知，
+        // 不再谎报“已是最新”。
+        await showUpdateFailedDialog(context);
       } else {
         await showLatestVersionDialog(context, currentVersion: current);
       }
