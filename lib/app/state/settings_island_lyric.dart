@@ -21,11 +21,10 @@ class IslandLyricSettings {
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
   static final ValueNotifier<bool> showProgress = ValueNotifier(true);
 
-  /// 通知类型：默认焦点通知（[typeFocus]），展开窗口左上角显示全彩官方 LOGO
-  /// （miui.focus.pic_logo，来自 R.mipmap.ic_launcher）。
-  /// 实时通知（[typeLive]）的 smallIcon 只能单色（系统强制着色），缩小后不可辨识。
+  /// 通知类型：默认实时通知（[typeLive]），无 root/Shizuku 直接上岛。
+  /// 焦点通知（[typeFocus]）可显示全彩 LOGO 但需系统白名单。
   /// 见类注释的 [typeLive]/[typeFocus]。
-  static final ValueNotifier<int> notificationType = ValueNotifier(typeFocus);
+  static final ValueNotifier<int> notificationType = ValueNotifier(typeLive);
 
   /// 测试模式：打开后即使不播放也持续模拟发送通知，用于验证暂停/无播放时
   /// 灵动岛是否仍能渲染。默认关闭。
@@ -50,19 +49,7 @@ class IslandLyricSettings {
     showProgress.value = prefs.getBool(_prefsShowProgress) ?? true;
     testMode.value = prefs.getBool(_prefsTestMode) ?? false;
     aodLyrics.value = prefs.getBool(_prefsAodLyrics) ?? false;
-    // 一次性强制迁移（v1.5.8）：老用户可能卡在实时通知(typeLive)，而实时通知的
-    // smallIcon 被系统强制单色着色，无法显示可辨识的官方全彩 LOGO（用户反馈前 7
-    // 个版本未修复）。焦点通知(typeFocus)通过 miui.focus.pic_logo 显示全彩官方
-    // LOGO（图一正确样式）。迁移后尊重用户在设置页的后续手动选择。
-    const migratedKey = 'island_lyric_migrated_focus_v1';
-    final migrated = prefs.getBool(migratedKey) ?? false;
-    if (!migrated) {
-      notificationType.value = typeFocus;
-      await prefs.setInt(_prefsNotificationType, typeFocus);
-      await prefs.setBool(migratedKey, true);
-    } else {
-      notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeFocus;
-    }
+    notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeLive;
     bypassFocusLimit.value = prefs.getBool(_prefsBypassFocusLimit) ?? false;
   }
 
@@ -111,7 +98,7 @@ class IslandLyricSettings {
     showProgress.value = true;
     testMode.value = false;
     aodLyrics.value = false;
-    notificationType.value = typeFocus;
+    notificationType.value = typeLive;
     bypassFocusLimit.value = false;
   }
 }
