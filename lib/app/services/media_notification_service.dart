@@ -287,21 +287,13 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
         : '$titleText · $artistText';
     final albumName = song.albumDisplayName;
 
-    // artUri: Android 优先使用本地文件 URI。
+    // artUri: 仅使用本地文件 URI（file:// 或 content://）。
+    // Android 系统通知栏加载 artUri 时不会携带认证头，远程 API URL 必然 401/403；
+    // 发了远程 URL 系统会"记住"加载失败状态，后续即使替换为本地 URI 也可能不刷新。
+    // 因此本地封面未就绪时传 null（显示默认图标），等 _syncAndUpdateCover 拿到本地路径后再更新。
     Uri? artUri;
-    if (song.coverId != null && song.coverId!.isNotEmpty) {
-      if (_cachedCoverUri != null) {
-        artUri = _cachedCoverUri;
-      } else {
-        // 本地封面尚未就绪时发远程 URL，audio_service 会自动下载并缓存
-        artUri = Uri.tryParse(
-          FeiNiuApiClient.instance.coverUrl(
-            song.coverId!,
-            size: 120,
-            updatedAt: song.updatedAt,
-          ),
-        );
-      }
+    if (song.coverId != null && song.coverId!.isNotEmpty && _cachedCoverUri != null) {
+      artUri = _cachedCoverUri;
     }
 
     final lyricOnTop = MediaNotificationSettings.lyricOnTop.value;
@@ -903,14 +895,15 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       _debugLog('song changed to ${snap.song?.title ?? 'none'}');
     }
 
-    // 先发布带认证头的 MediaItem，再在后台将封面复制到专用缓存并
-    // 替换为 content:// URI。后者可供 Android Auto 等外部进程读取。
+    // 切歌时先发布无封面的 MediaItem（避免用无法认证的远程 URL），
+    // 然后异步下载封面到本地缓存，拿到 content:// / file:// URI 后再刷新媒体项。
+    // 系统通知栏和 Android Auto 均可读取本地 URI 显示封面。
     if (songChanged) {
       final song = snap.song;
       _cachedCoverUri = null;
       if (song != null && song.coverId != null && song.coverId!.isNotEmpty) {
         _lastCoverId = song.coverId;
-        // 先发送带认证头的 MediaItem，避免等待封面下载阻塞播放状态。
+        // 先发送 MediaItem（artUri 暂为 null，封面下载中）。
         _syncQueue(snap);
         _syncMediaItem();
         // 后台下载封面，缓存后通过只读 Provider 发布 content:// URI。
