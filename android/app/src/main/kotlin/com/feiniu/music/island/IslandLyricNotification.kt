@@ -219,17 +219,22 @@ class IslandLyricNotification(private val context: Context) {
         if (albumIcon != null) {
             picsBundle.putParcelable("miui.focus.pic_album", albumIcon)
         }
-        // 卡片（baseInfo）左上角应用 LOGO：显式放入彩色应用图标。
-        // 不依赖 smallIcon——smallIcon 必须是单色，被系统 tint 后只会显示成
-        // 纯色块（紫块）。焦点通知 JSON 的 baseInfo.pic 引用此 key，让
-        // HyperOS 渲染出彩色飞牛音乐图标。
-        picsBundle.putParcelable(
-            "miui.focus.pic_logo",
-            android.graphics.drawable.Icon.createWithResource(
-                context,
-                R.mipmap.ic_launcher,
-            ),
+        // 卡片（baseInfo）左上角应用 LOGO：用 bitmap 方式创建（与大岛封面
+        // miui.focus.pic_album 同源），确保 HyperOS 在展开卡片里能稳定跨进程渲染。
+        // 之前用 Icon.createWithResource（资源 Icon）放在 miui.focus.pics 里，
+        // 该 bundle 跨进程传递时资源 Icon 在部分 HyperOS 版本的 baseInfo.pic 上
+        // 解析失败，系统回退成空白圆圈。bitmap Icon 直接打包像素，与 pic_album
+        // 一样已验证可正常渲染。
+        val logoBmp = android.graphics.BitmapFactory.decodeResource(
+            context.resources,
+            R.mipmap.ic_launcher,
         )
+        if (logoBmp != null) {
+            picsBundle.putParcelable(
+                "miui.focus.pic_logo",
+                android.graphics.drawable.Icon.createWithBitmap(logoBmp),
+            )
+        }
         extras.putBundle("miui.focus.pics", picsBundle)
 
         // 外发光光圈效果（参考 HyperIsland IslandOuterGlowHook 的注入方式）：
@@ -315,14 +320,20 @@ class IslandLyricNotification(private val context: Context) {
     }
 
     /** 实时通知路径：标准 Android 实时通知接口上岛（无 root/Shizuku/白名单）。 */
-    private fun notifyLive(uiState: IslandUiState, coverPath: String?, durationMs: Long) {
+    private fun notifyLive(uiState: IslandUiState, coverPath: String?, durationMs: Long) {        // 封面：实时动态左侧是图标位，用封面图（对齐 HyperLyric buildNormalNotification
+        // 的 setSmallIcon(封面)）；无封面时退回应用图标。
         val albumIcon = loadCoverIcon(coverPath)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE)
-            // 灵动胶囊展开后，窗口左上角要求显示可被系统裁剪为圆形的应用 LOGO。
-            // 若用封面 bitmap 作为 smallIcon，HyperOS 无法将其裁成圆形，会渲染为
-            // 空白圆圈；固定使用应用图标资源，胶囊/展开视图都能正常显示 LOGO。
-            // 封面仍通过 setLargeIcon 显示在通知卡片右侧。
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(
+                if (albumIcon != null) {
+                    androidx.core.graphics.drawable.IconCompat.createFromIcon(albumIcon)
+                } else {
+                    androidx.core.graphics.drawable.IconCompat.createWithResource(
+                        context,
+                        R.drawable.ic_notification
+                    )
+                }
+            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCustomContentView(null)
