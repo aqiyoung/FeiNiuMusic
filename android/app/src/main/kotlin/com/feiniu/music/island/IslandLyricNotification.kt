@@ -386,6 +386,30 @@ class IslandLyricNotification(private val context: Context) {
         // 需配合 manifest 的 POST_PROMOTED_NOTIFICATIONS 权限，否则被系统忽略。
         builder.setRequestPromotedOngoing(true)
 
+        // ---- 关键修复：注入全彩应用 LOGO 供灵动岛展开窗口使用 ----
+        // 实时通知的 smallIcon 被 Android/HyperOS 强制单色着色，展开窗口左上角
+        // 只能显示一个主题色的模糊色块（用户反复反馈"不是官方LOGO"）。
+        // 焦点通知通过 miui.focus.pic_logo 传递全彩 bitmap 可显示正确的官方图标，
+        // 但用户可能因旧设置仍在实时模式、或不想配置 Shizuku/白名单。
+        //
+        // 方案：在实时通知中也注入 miui.focus.pics（含 pic_logo 全彩 bitmap）。
+        // HyperOS 渲染灵动岛时若检测到该 extra，会优先使用全彩 bitmap 替代
+        // 被染色的 smallIcon 作为展开窗口左上角图标。经实测（v1.5.7），
+        // 部分 HyperOS 版本会读取此 extra 并正确渲染全彩 LOGO。
+        // 若系统忽略此 extra（较老版本），则回退到 smallIcon 单色行为（无退化）。
+        val logoBmpForLive = loadAppLogoBitmap()
+        if (logoBmpForLive != null) {
+            // 嵌套结构必须与焦点通知一致：extras["miui.focus.pics"]["miui.focus.pic_logo"]
+            val livePicsBundle = Bundle()
+            livePicsBundle.putParcelable(
+                "miui.focus.pic_logo",
+                android.graphics.drawable.Icon.createWithBitmap(logoBmpForLive),
+            )
+            val livePicsWrapper = Bundle()
+            livePicsWrapper.putBundle("miui.focus.pics", livePicsBundle)
+            builder.addExtras(livePicsWrapper)
+        }
+
         val notification = builder.build()
         // 常驻通知：不可手动滑动清除，仅由 stop/暂停逻辑取消
         notification.flags =
