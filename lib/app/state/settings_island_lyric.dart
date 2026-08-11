@@ -50,7 +50,19 @@ class IslandLyricSettings {
     showProgress.value = prefs.getBool(_prefsShowProgress) ?? true;
     testMode.value = prefs.getBool(_prefsTestMode) ?? false;
     aodLyrics.value = prefs.getBool(_prefsAodLyrics) ?? false;
-    notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeFocus;
+    // 一次性强制迁移（v1.5.8）：老用户可能卡在实时通知(typeLive)，而实时通知的
+    // smallIcon 被系统强制单色着色，无法显示可辨识的官方全彩 LOGO（用户反馈前 7
+    // 个版本未修复）。焦点通知(typeFocus)通过 miui.focus.pic_logo 显示全彩官方
+    // LOGO（图一正确样式）。迁移后尊重用户在设置页的后续手动选择。
+    const migratedKey = 'island_lyric_migrated_focus_v1';
+    final migrated = prefs.getBool(migratedKey) ?? false;
+    if (!migrated) {
+      notificationType.value = typeFocus;
+      await prefs.setInt(_prefsNotificationType, typeFocus);
+      await prefs.setBool(migratedKey, true);
+    } else {
+      notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeFocus;
+    }
     bypassFocusLimit.value = prefs.getBool(_prefsBypassFocusLimit) ?? false;
   }
 
