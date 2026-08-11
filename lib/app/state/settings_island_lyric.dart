@@ -17,14 +17,15 @@ class IslandLyricSettings {
   static const String _prefsAodLyrics = 'island_lyric_aod_lyrics';
   static const String _prefsNotificationType = 'island_lyric_notification_type';
   static const String _prefsBypassFocusLimit = 'island_lyric_bypass_focus_limit';
+  static const String _prefsMigratedFocusV2 = 'island_lyric_migrated_focus_v2';
 
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
   static final ValueNotifier<bool> showProgress = ValueNotifier(true);
 
-  /// 通知类型：默认实时通知（[typeLive]），无 root/Shizuku 直接上岛。
-  /// 焦点通知（[typeFocus]）可显示全彩 LOGO 但需系统白名单。
+  /// 通知类型：默认焦点通知（[typeFocus]），以显示全彩官方 LOGO。
+  /// 底层会按 Shizuku 可用性自动回退：无 Shizuku/白名单时回退实时通知保歌词。
   /// 见类注释的 [typeLive]/[typeFocus]。
-  static final ValueNotifier<int> notificationType = ValueNotifier(typeLive);
+  static final ValueNotifier<int> notificationType = ValueNotifier(typeFocus);
 
   /// 测试模式：打开后即使不播放也持续模拟发送通知，用于验证暂停/无播放时
   /// 灵动岛是否仍能渲染。默认关闭。
@@ -49,7 +50,21 @@ class IslandLyricSettings {
     showProgress.value = prefs.getBool(_prefsShowProgress) ?? true;
     testMode.value = prefs.getBool(_prefsTestMode) ?? false;
     aodLyrics.value = prefs.getBool(_prefsAodLyrics) ?? false;
-    notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeLive;
+    // 通知类型：新安装默认焦点（全彩官方 LOGO）；历史默认实时（typeLive）的
+    // 老用户一次性迁移到焦点。底层会按 Shizuku 可用性自动回退实时通知，
+    // 无 Shizuku 时不丢歌词（避免 v1.5.8 整岛消失回归）。
+    final migratedFocusV2 = prefs.getBool(_prefsMigratedFocusV2) ?? false;
+    var loadedType = prefs.getInt(_prefsNotificationType);
+    if (loadedType == null) {
+      loadedType = typeFocus;
+    } else if (!migratedFocusV2 && loadedType == typeLive) {
+      loadedType = typeFocus;
+      await prefs.setInt(_prefsNotificationType, typeFocus);
+      await prefs.setBool(_prefsMigratedFocusV2, true);
+    } else if (!migratedFocusV2) {
+      await prefs.setBool(_prefsMigratedFocusV2, true);
+    }
+    notificationType.value = loadedType;
     bypassFocusLimit.value = prefs.getBool(_prefsBypassFocusLimit) ?? false;
   }
 

@@ -188,7 +188,14 @@ class IslandLyricNotification(private val context: Context) {
         if (notificationType == TYPE_LIVE) {
             notifyLive(uiState, coverPath, duration)
         } else {
-            notifyFocusWithBypass(uiState, coverPath, bypassFocusLimit)
+            // 焦点通知需系统白名单放行；只有 Shizuku 已授权（可绕过白名单）时才走
+            // 焦点路径以显示全彩官方 LOGO（miui.focus.pic_logo）。否则回退实时通知，
+            // 保证歌词不丢——避免无白名单时整岛不显示、歌词消失的回归（v1.5.8 教训）。
+            if (ShizukuManager.hasBypassPermission(context.packageName)) {
+                notifyFocusWithBypass(uiState, coverPath, true)
+            } else {
+                notifyLive(uiState, coverPath, duration)
+            }
         }
     }
 
