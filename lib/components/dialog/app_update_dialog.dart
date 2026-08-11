@@ -20,6 +20,30 @@ Future<void> _openUrl(BuildContext context, String url) async {
 /// 用 gh-proxy 包裹 GitHub 链接, 国内/弱网用户直连失败时兜底.
 String _proxyUrl(String url) => 'https://gh-proxy.com/$url';
 
+/// 优先用 GitHub App 私有 scheme 直接调起 App 跳到发布页；
+/// 调不起（未装 App / 不支持 scheme）回退到原始 https
+/// （Android App Link / iOS Universal Link 仍会拉起 GitHub App，否则浏览器）。
+Future<void> _openGitHubApp(BuildContext context, String releaseUrl) async {
+  final schemeUrl = releaseUrl.replaceFirst(
+    'https://github.com/',
+    'github://repositories/',
+  );
+  if (schemeUrl.startsWith('github://')) {
+    try {
+      if (await canLaunchUrl(Uri.parse(schemeUrl))) {
+        final ok = await launchUrl(
+          Uri.parse(schemeUrl),
+          mode: LaunchMode.externalApplication,
+        );
+        if (ok) return;
+      }
+    } catch (_) {
+      // 未安装 GitHub App 或不支持该 scheme，走回退
+    }
+  }
+  await _openUrl(context, releaseUrl);
+}
+
 /// Polished "update available" prompt. Shown for both manual checks and the
 /// auto-check-on-launch flow.
 Future<void> showAppUpdateDialog(
@@ -86,7 +110,7 @@ Future<void> showUpdateFailedDialog(BuildContext context) {
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
-            _openUrl(context, AppUpdateService.releasePageUrl);
+            _openGitHubApp(context, AppUpdateService.releasePageUrl);
           },
           child: const Text('手动打开'),
         ),
@@ -223,7 +247,7 @@ class _UpdateAvailableDialog extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
               child: Text(
-                '「前往下载」直接跳转 GitHub Release 页, 在页面里点下载; '
+                '「前往下载」优先调起 GitHub App 打开发布页（未装则自动用浏览器）; '
                 '国内访问不畅时点「代理下载」走 gh-proxy 打开同一页面',
                 style: TextStyle(
                   fontSize: 12,
@@ -259,7 +283,7 @@ class _UpdateAvailableDialog extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      _openUrl(
+                      _openGitHubApp(
                         context,
                         info.releaseUrl ?? AppUpdateService.releasePageUrl,
                       );
