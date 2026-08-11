@@ -315,20 +315,14 @@ class IslandLyricNotification(private val context: Context) {
     }
 
     /** 实时通知路径：标准 Android 实时通知接口上岛（无 root/Shizuku/白名单）。 */
-    private fun notifyLive(uiState: IslandUiState, coverPath: String?, durationMs: Long) {        // 封面：实时动态左侧是图标位，用封面图（对齐 HyperLyric buildNormalNotification
-        // 的 setSmallIcon(封面)）；无封面时退回应用图标。
+    private fun notifyLive(uiState: IslandUiState, coverPath: String?, durationMs: Long) {
         val albumIcon = loadCoverIcon(coverPath)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE)
-            .setSmallIcon(
-                if (albumIcon != null) {
-                    androidx.core.graphics.drawable.IconCompat.createFromIcon(albumIcon)
-                } else {
-                    androidx.core.graphics.drawable.IconCompat.createWithResource(
-                        context,
-                        R.drawable.ic_notification
-                    )
-                }
-            )
+            // 灵动胶囊展开后，窗口左上角要求显示可被系统裁剪为圆形的应用 LOGO。
+            // 若用封面 bitmap 作为 smallIcon，HyperOS 无法将其裁成圆形，会渲染为
+            // 空白圆圈；固定使用应用图标资源，胶囊/展开视图都能正常显示 LOGO。
+            // 封面仍通过 setLargeIcon 显示在通知卡片右侧。
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCustomContentView(null)
