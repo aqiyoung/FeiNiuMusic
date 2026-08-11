@@ -219,16 +219,13 @@ class IslandLyricNotification(private val context: Context) {
         if (albumIcon != null) {
             picsBundle.putParcelable("miui.focus.pic_album", albumIcon)
         }
-        // 卡片（baseInfo）左上角应用 LOGO：用 bitmap 方式创建（与大岛封面
+        // 卡片（baseInfo）/ 胶囊左上角应用 LOGO：用 bitmap 方式创建（与大岛封面
         // miui.focus.pic_album 同源），确保 HyperOS 在展开卡片里能稳定跨进程渲染。
-        // 之前用 Icon.createWithResource（资源 Icon）放在 miui.focus.pics 里，
-        // 该 bundle 跨进程传递时资源 Icon 在部分 HyperOS 版本的 baseInfo.pic 上
-        // 解析失败，系统回退成空白圆圈。bitmap Icon 直接打包像素，与 pic_album
-        // 一样已验证可正常渲染。
-        val logoBmp = android.graphics.BitmapFactory.decodeResource(
-            context.resources,
-            R.mipmap.ic_launcher,
-        )
+        // 注意 BitmapFactory.decodeResource 会按资源 density 给位图打上密度标记，
+        // 直接 Icon.createWithBitmap 在部分 HyperOS 版本会被按 density 缩放/裁切，
+        // 最终渲染成空白圆圈；loadAppLogoBitmap() 统一重绘到固定 128px、density=
+        // DENSITY_NONE 的位图（与 loadCoverIcon 封面同源处理），稳定渲染。
+        val logoBmp = loadAppLogoBitmap()
         if (logoBmp != null) {
             picsBundle.putParcelable(
                 "miui.focus.pic_logo",
@@ -320,19 +317,19 @@ class IslandLyricNotification(private val context: Context) {
     }
 
     /** 实时通知路径：标准 Android 实时通知接口上岛（无 root/Shizuku/白名单）。 */
-    private fun notifyLive(uiState: IslandUiState, coverPath: String?, durationMs: Long) {        // 封面：实时动态左侧是图标位，用封面图（对齐 HyperLyric buildNormalNotification
-        // 的 setSmallIcon(封面)）；无封面时退回应用图标。
+    private fun notifyLive(uiState: IslandUiState, coverPath: String?, durationMs: Long) {
+        // 封面 bitmap 仅用于下方 setLargeIcon（通知卡片右侧）；胶囊 smallIcon 固定用应用图标。
         val albumIcon = loadCoverIcon(coverPath)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE)
+            // 灵动胶囊左上角要求 smallIcon 是「可被系统裁剪成圆形的资源图标」。
+            // 用歌曲封面 bitmap 作 smallIcon 时，HyperOS 展开视图无法将其裁成圆形，
+            // 会渲染为空白圆圈（见 786082a）。固定使用应用图标资源，胶囊/展开视图
+            // 都能稳定显示 LOGO；封面仍通过下方的 setLargeIcon 显示在通知卡片右侧。
             .setSmallIcon(
-                if (albumIcon != null) {
-                    androidx.core.graphics.drawable.IconCompat.createFromIcon(albumIcon)
-                } else {
-                    androidx.core.graphics.drawable.IconCompat.createWithResource(
-                        context,
-                        R.drawable.ic_notification
-                    )
-                }
+                androidx.core.graphics.drawable.IconCompat.createWithResource(
+                    context,
+                    R.mipmap.ic_launcher,
+                )
             )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -424,6 +421,47 @@ class IslandLyricNotification(private val context: Context) {
      * AlbumImageHelper.processAlbumBitmap），供实时通知 small/large icon、
      * 焦点通知 miui.focus.pics 使用。
      */
+    /**
+     * 加载应用 LOGO 为系统位图（失败返回 null）。
+     *
+     * 用于焦点通知 baseInfo / 胶囊左上角的彩色应用图标（miui.focus.pic_logo），
+     * 以及实时通知胶囊 smallIcon。
+     *
+     * 关键坑：`BitmapFactory.decodeResource` 会按资源 density 给位图打上密度标记，
+     * 直接 `Icon.createWithBitmap` 在部分 HyperOS 版本会被按 density 缩放/裁切，
+     * 最终在灵动岛渲染成空白圆圈（这正是 pic_logo 反复「修不好」的根因）。
+     * 这里重绘到固定 128px、density = DENSITY_NONE 的位图，与 [loadCoverIcon]
+     * 封面同源处理方式，保证稳定渲染。
+     */
+    private fun loadAppLogoBitmap(): android.graphics.Bitmap? {
+        return try {
+            val src = android.graphics.BitmapFactory.decodeResource(
+                context.resources,
+                R.mipmap.ic_launcher,
+            ) ?: return null
+            val size = 128
+            val output = android.graphics.Bitmap.createBitmap(
+                size, size, android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            output.density = android.graphics.Bitmap.DENSITY_NONE
+            val canvas = android.graphics.Canvas(output)
+            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                isFilterBitmap = true
+            }
+            canvas.drawBitmap(
+                src,
+                android.graphics.Rect(0, 0, src.width, src.height),
+                android.graphics.Rect(0, 0, size, size),
+                paint,
+            )
+            src.recycle()
+            output
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "加载应用 LOGO 失败", e)
+            null
+        }
+    }
+
     private fun loadCoverIcon(coverPath: String?): android.graphics.drawable.Icon? {
         if (coverPath.isNullOrBlank()) return null
         return try {
