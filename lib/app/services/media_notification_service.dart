@@ -274,6 +274,31 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     return null;
   }
 
+  // ---- 快速封面缓存查找（切歌时同步调用） ----
+
+  /// 纯磁盘缓存查找：检查 flutter_cache_manager 是否已有该封面的本地文件。
+  /// 不发起任何网络请求，UI 已通过 CachedNetworkImage 展示过则缓存命中率接近 100%。
+  Future<Uri?> _quickCacheLookup(String coverId, {int? updatedAt}) async {
+    // 查 flutter_cache_manager 磁盘缓存（CachedNetworkImage 共用池，纯磁盘 I/O）
+    try {
+      final url = FeiNiuApiClient.instance.coverUrl(coverId, size: 120, updatedAt: updatedAt);
+      final cacheObject = await _coverCache.getFileFromCache(url);
+      if (cacheObject != null) {
+        final cachedPath = cacheObject.file.path;
+        final cachedFile = io.File(cachedPath);
+        if (await cachedFile.exists()) {
+          _debugLog('quickCacheLookup hit path=$cachedPath');
+          return Uri.file(cachedPath);
+        }
+      }
+    } catch (e) {
+      _debugLog('quickCacheLookup failed: $e');
+    }
+
+    _debugLog('quickCacheLookup miss coverId=$coverId');
+    return null;
+  }
+
   // ---- MediaItem / PlaybackState 构建 ----
 
   MediaItem _itemFromSong(SongEntity song) {
@@ -884,7 +909,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     });
   }
 
-  void _syncFromPlayer() {
+  Future<void> _syncFromPlayer() async {
     final snap = player.snapshot.value;
     _requestNotificationPermissionIfNeeded(snap);
     final songId = snap.song?.id;
@@ -895,19 +920,25 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       _debugLog('song changed to ${snap.song?.title ?? 'none'}');
     }
 
-    // 切歌时先发布无封面的 MediaItem（避免用无法认证的远程 URL），
-    // 然后异步下载封面到本地缓存，拿到 content:// / file:// URI 后再刷新媒体项。
-    // 系统通知栏和 Android Auto 均可读取本地 URI 显示封面。
+    // 切歌时优先从缓存获取封面（CachedNetworkImage 已在 UI 展示时下载过，
+    // 磁盘缓存命中率极高），拿到本地 URI 后再发布 MediaItem。
+    // 避免先发无封面通知再异步刷新——HyperOS/Xiaomi 媒体控件对后续 artwork
+    // 更新支持不一致，很多情况下"记住"了首次发布的空封面状态。
     if (songChanged) {
       final song = snap.song;
       _cachedCoverUri = null;
       if (song != null && song.coverId != null && song.coverId!.isNotEmpty) {
         _lastCoverId = song.coverId;
-        // 先发送 MediaItem（artUri 暂为 null，封面下载中）。
+        // 同步查缓存（纯磁盘 I/O，不发起网络请求），UI 已展示过则必命中。
+        final cached = await _quickCacheLookup(song.coverId!, song.updatedAt);
+        if (cached != null) {
+          _cachedCoverUri = cached;
+          _debugLog('cover cache hit on song change, publishing with artUri');
+        }
         _syncQueue(snap);
         _syncMediaItem();
-        // 后台下载封面，缓存后通过只读 Provider 发布 content:// URI。
-        if (io.Platform.isAndroid) {
+        // 缓存未命中时后台下载，完成后刷新（兜底）。
+        if (_cachedCoverUri == null && io.Platform.isAndroid) {
           unawaited(_syncAndUpdateCover(song));
         }
       } else {
