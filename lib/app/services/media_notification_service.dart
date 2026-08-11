@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert' show utf8;
 import 'dart:io' as io;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
@@ -276,23 +278,53 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
 
   // ---- 快速封面缓存查找（切歌时同步调用） ----
 
-  /// 纯磁盘缓存查找：检查 flutter_cache_manager 是否已有该封面的本地文件。
-  /// 不发起任何网络请求，UI 已通过 CachedNetworkImage 展示过则缓存命中率接近 100%。
+  /// 多源封面缓存查找（切歌时同步调用，不发起网络请求）。
+  ///
+  /// 查找顺序：
+  /// 1. CoverLocalCache 的 sha1 命名文件（之前播放/下载过则必命中，与尺寸无关）
+  /// 2. flutter_cache_manager 磁盘缓存（CachedNetworkImage 共用池，查多个常用尺寸）
+  ///
+  /// UI 已通过 CachedNetworkImage 展示过该歌曲封面，或用户之前听过这首歌，
+  /// 则命中率极高。拿到本地 file:// URI 后发布首个 MediaItem，确保封面从一开始就正确。
   Future<Uri?> _quickCacheLookup(String coverId, {int? updatedAt}) async {
-    // 查 flutter_cache_manager 磁盘缓存（CachedNetworkImage 共用池，纯磁盘 I/O）
+    // 1. CoverLocalCache sha1 文件（与尺寸无关，只要之前下载过就存在）
     try {
-      final url = FeiNiuApiClient.instance.coverUrl(coverId, size: 120, updatedAt: updatedAt);
-      final cacheObject = await _coverCache.getFileFromCache(url);
-      if (cacheObject != null) {
-        final cachedPath = cacheObject.file.path;
-        final cachedFile = io.File(cachedPath);
-        if (await cachedFile.exists()) {
-          _debugLog('quickCacheLookup hit path=$cachedPath');
-          return Uri.file(cachedPath);
-        }
+      final cacheKey = '$coverId:${updatedAt ?? 0}';
+      final fileName =
+          '${crypto.sha1.convert(utf8.encode(cacheKey))}.img';
+      final dir = await getTemporaryDirectory();
+      final imgFile = io.File('${dir.path}/covers_v2/$fileName');
+      if (await imgFile.exists()) {
+        _debugLog('quickCacheLookup hit CoverLocalCache path=${imgFile.path}');
+        return Uri.file(imgFile.path);
       }
     } catch (e) {
-      _debugLog('quickCacheLookup failed: $e');
+      _debugLog('quickCacheLookup CoverLocalCache check failed: $e');
+    }
+
+    // 2. flutter_cache_manager（UI 用 CachedNetworkImage 展示时已下载）
+    //    查多个常用尺寸以最大化命中（UI 可能用 52/120/300/512 等）
+    for (final size in [52, 120, 300]) {
+      try {
+        final url = FeiNiuApiClient.instance.coverUrl(
+          coverId,
+          size: size,
+          updatedAt: updatedAt,
+        );
+        final cacheObject = await _coverCache.getFileFromCache(url);
+        if (cacheObject != null) {
+          final cachedPath = cacheObject.file.path;
+          final cachedFile = io.File(cachedPath);
+          if (await cachedFile.exists()) {
+            _debugLog(
+              'quickCacheLookup hit fcm size=$size path=$cachedPath',
+            );
+            return Uri.file(cachedPath);
+          }
+        }
+      } catch (e) {
+        // 继续尝试下一个尺寸
+      }
     }
 
     _debugLog('quickCacheLookup miss coverId=$coverId');
@@ -930,7 +962,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       if (song != null && song.coverId != null && song.coverId!.isNotEmpty) {
         _lastCoverId = song.coverId;
         // 同步查缓存（纯磁盘 I/O，不发起网络请求），UI 已展示过则必命中。
-        final cached = await _quickCacheLookup(song.coverId!, song.updatedAt);
+        final cached = await _quickCacheLookup(song.coverId!, updatedAt: song.updatedAt);
         if (cached != null) {
           _cachedCoverUri = cached;
           _debugLog('cover cache hit on song change, publishing with artUri');
