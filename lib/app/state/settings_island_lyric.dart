@@ -21,9 +21,11 @@ class IslandLyricSettings {
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
   static final ValueNotifier<bool> showProgress = ValueNotifier(true);
 
-  /// 通知类型：默认实时通知（[typeLive]），无 root/Shizuku 直接上岛。
+  /// 通知类型：默认焦点通知（[typeFocus]），展开窗口左上角显示全彩官方 LOGO
+  /// （miui.focus.pic_logo，来自 R.mipmap.ic_launcher）。
+  /// 实时通知（[typeLive]）的 smallIcon 只能单色（系统强制着色），缩小后不可辨识。
   /// 见类注释的 [typeLive]/[typeFocus]。
-  static final ValueNotifier<int> notificationType = ValueNotifier(typeLive);
+  static final ValueNotifier<int> notificationType = ValueNotifier(typeFocus);
 
   /// 测试模式：打开后即使不播放也持续模拟发送通知，用于验证暂停/无播放时
   /// 灵动岛是否仍能渲染。默认关闭。
@@ -48,7 +50,7 @@ class IslandLyricSettings {
     showProgress.value = prefs.getBool(_prefsShowProgress) ?? true;
     testMode.value = prefs.getBool(_prefsTestMode) ?? false;
     aodLyrics.value = prefs.getBool(_prefsAodLyrics) ?? false;
-    notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeLive;
+    notificationType.value = prefs.getInt(_prefsNotificationType) ?? typeFocus;
     bypassFocusLimit.value = prefs.getBool(_prefsBypassFocusLimit) ?? false;
   }
 
@@ -97,7 +99,7 @@ class IslandLyricSettings {
     showProgress.value = true;
     testMode.value = false;
     aodLyrics.value = false;
-    notificationType.value = typeLive;
+    notificationType.value = typeFocus;
     bypassFocusLimit.value = false;
   }
 }
