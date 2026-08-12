@@ -21,6 +21,7 @@ class SongEntity {
   final int? updatedAt; // 服务端 updatedAt 时间戳，用于 CDN 缓存刷新
   final bool isCue;
   final int? cueOffsetMs; // CUE 整轨曲目在物理文件内的起始偏移（专辑上下文累计）
+  final bool isAudioFileDeleted; // 失效歌曲（音频文件已删除）
 
   const SongEntity({
     required this.id,
@@ -43,6 +44,7 @@ class SongEntity {
     this.updatedAt,
     this.isCue = false,
     this.cueOffsetMs,
+    this.isAudioFileDeleted = false,
   });
 
   /// 解析 artist JSON 获取歌手显示名
@@ -236,6 +238,7 @@ class SongEntity {
       'updatedAt': updatedAt,
       'isCue': isCue ? 1 : 0,
       'cueOffsetMs': cueOffsetMs,
+      'isAudioFileDeleted': isAudioFileDeleted ? 1 : 0,
     };
   }
 
@@ -266,6 +269,8 @@ class SongEntity {
       updatedAt: parseInt(map['updatedAt']),
       isCue: map['isCue'] == true || map['isCue'] == 1,
       cueOffsetMs: parseInt(map['cueOffsetMs']),
+      isAudioFileDeleted:
+          map['isAudioFileDeleted'] == true || map['isAudioFileDeleted'] == 1,
     );
   }
 
@@ -290,6 +295,7 @@ class SongEntity {
     int? updatedAt,
     bool? isCue,
     int? cueOffsetMs,
+    bool? isAudioFileDeleted,
   }) {
     return SongEntity(
       id: id ?? this.id,
@@ -312,6 +318,7 @@ class SongEntity {
       updatedAt: updatedAt ?? this.updatedAt,
       isCue: isCue ?? this.isCue,
       cueOffsetMs: cueOffsetMs ?? this.cueOffsetMs,
+      isAudioFileDeleted: isAudioFileDeleted ?? this.isAudioFileDeleted,
     );
   }
 }

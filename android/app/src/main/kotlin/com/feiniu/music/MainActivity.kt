@@ -31,7 +31,6 @@ import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import com.feiniu.music.island.IslandLyricNotification
 import com.feiniu.music.island.shizuku.ShizukuManager
-import com.feiniu.music.match.SearchSourceManager
 import com.feiniu.music.track_change.OverlayTrackChange
 import com.feiniu.music.R
 import kotlinx.coroutines.CoroutineScope
@@ -48,7 +47,6 @@ class MainActivity : AudioServiceActivity() {
     private val tvChannelName = "com.feiniu.music/tv"
     private val islandLyricChannelName = "com.feiniu.music/island_lyric"
     private val islandShizukuChannelName = "com.feiniu.music/island_lyric_shizuku"
-    private val matchPluginChannelName = "com.feiniu.music/match_plugin"
     private val systemSettingsChannelName = "com.feiniu.music/system_settings"
     private val castVolumeChannelName = "com.feiniu.music/cast_volume"
     private val notificationId = 10010
@@ -326,6 +324,10 @@ class MainActivity : AudioServiceActivity() {
                 }
                 "hasOverlayPermission" -> result.success(overlayTrackChange.hasOverlayPermission())
                 "openOverlaySettings" -> result.success(overlayTrackChange.openOverlaySettings())
+                "showPermissionToast" -> {
+                    overlayTrackChange.showPermissionToast()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -357,39 +359,6 @@ class MainActivity : AudioServiceActivity() {
                 }
                 "hasOverlayPermission" -> result.success(overlayFloatingIsland.hasOverlayPermission())
                 "openOverlaySettings" -> result.success(overlayFloatingIsland.openOverlaySettings())
-                else -> result.notImplemented()
-            }
-        }
-
-        // 数据源插件（Lyrico 搜索源）JS 执行通道。Dart 层传入拼接好的脚本与
-        // 请求 JSON，Kotlin 在后台线程跑 QuickJS 并返回插件原始返回值。
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            matchPluginChannelName
-        ).setMethodCallHandler { call, result ->
-            val script = call.argument<String>("script") ?: ""
-            val pluginId = call.argument<String>("pluginId") ?: ""
-            val cacheRootDir = call.argument<String>("cacheRootDir")
-            when (call.method) {
-                "searchSongs", "getLyrics", "searchCovers" -> {
-                    val requestJson = call.argument<String>("requestJson") ?: "{}"
-                    // 插件 JS 执行放后台线程（QuickJS 单线程 + 同步宿主 HTTP），
-                    // 绝不阻塞主线程（Shizuku 通道同款经验）。
-                    shizukuScope.launch {
-                        try {
-                            val raw = SearchSourceManager.runScript(
-                                script = script,
-                                pluginId = pluginId,
-                                cacheRootDir = cacheRootDir,
-                                functionName = call.method,
-                                requestJson = requestJson
-                            )
-                            result.success(raw)
-                        } catch (e: Exception) {
-                            result.error("PLUGIN_ERROR", e.message ?: "plugin error", null)
-                        }
-                    }
-                }
                 else -> result.notImplemented()
             }
         }

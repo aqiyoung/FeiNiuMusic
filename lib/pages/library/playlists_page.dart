@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signals_flutter/signals_flutter.dart' hide computed;
@@ -15,6 +16,7 @@ import '../../app/services/feiniu/api_models.dart';
 import '../../app/services/feiniu/favorite_service.dart';
 import '../../app/services/feiniu/playlist_service.dart';
 import '../../app/services/feiniu/track_service.dart';
+import '../../app/services/song_match/backend_match_client.dart';
 import '../../app/services/player_service.dart';
 import '../../app/state/settings_layout_state.dart';
 import '../../app/state/settings_playback_state.dart';
@@ -109,10 +111,12 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     for (final p in items.take(count)) {
       if (p.coverId != null && p.coverId!.isNotEmpty) {
         final url = api.coverUrl(p.coverId!, size: 300, updatedAt: p.updatedAt);
-        unawaited(precacheImage(
-          CachedNetworkImageProvider(url, headers: headers),
-          context,
-        ));
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider(url, headers: headers),
+            context,
+          ),
+        );
       }
     }
   }
@@ -137,7 +141,8 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   }
 
   void _handleScroll() {
-    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value)
+      return;
     final maxScroll = _scrollController.position.maxScrollExtent;
     final offset = _scrollController.offset;
     if (maxScroll - offset < 400) {
@@ -329,6 +334,35 @@ class _PlaylistsPageState extends State<PlaylistsPage>
       _filteredPlaylists.value = _playlists.value.where((p) {
         return p.name.toLowerCase().contains(q);
       }).toList();
+    }
+  }
+
+  /// 导入歌单（网易云 / QQ / 酷狗 / 酷我）：粘贴链接 → 服务端解析并写入，结果展示。
+  Future<void> _importPlaylist() async {
+    final url = await showDialog<String>(
+      context: context,
+      builder: (_) => const _PlaylistImportDialog(),
+    );
+    if (url == null || url.isEmpty || !mounted) return;
+    if (!BackendMatchClient.instance.available) {
+      AppToast.show(context, '服务端增强不可达，无法导入歌单', type: ToastType.error);
+      return;
+    }
+    AppToast.show(context, '正在导入歌单…');
+    try {
+      final result = await BackendMatchClient.instance.importPlaylist(url);
+      if (!mounted) return;
+      AppToast.show(
+        context,
+        '导入完成：「${result['name']}」共 ${result['total']} 首，'
+        '已匹配 ${result['matched']}，新增 ${result['inserted']}'
+        '${(result['failed'] ?? 0) > 0 ? '，失败 ${result['failed']}' : ''}',
+        type: (result['failed'] ?? 0) > 0 ? ToastType.error : ToastType.success,
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, '导入失败：$e', type: ToastType.error);
     }
   }
 
@@ -608,6 +642,11 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             ),
             SortActionButton(onTap: _showSortSheet),
             IconButton(
+              tooltip: '导入歌单',
+              icon: const Icon(Icons.playlist_add_check_circle_outlined),
+              onPressed: _importPlaylist,
+            ),
+            IconButton(
               tooltip: '新建歌单',
               icon: const Icon(Icons.add),
               onPressed: _createPlaylist,
@@ -651,7 +690,10 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                         : null,
                     filled: true,
                     fillColor: Theme.of(context).appPanelColor,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     border: const OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(20)),
                       borderSide: BorderSide.none,
@@ -667,11 +709,20 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                   child: _loading.value
                       ? const Center(child: CircularProgressIndicator())
                       : _filteredPlaylists.value.isEmpty
-                      ? const Center(child: Text('暂无歌单'))
+                      ? ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: const [
+                            SizedBox(height: 160),
+                            Center(child: Text('暂无歌单')),
+                          ],
+                        )
                       : CustomScrollView(
                           controller: _scrollController,
+                          physics: const AlwaysScrollableScrollPhysics(),
                           slivers: [
-                            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 8),
+                            ),
                             SliverPadding(
                               padding: AppLayoutSettings.tvMode.value
                                   ? TvLayout.pagePadding()
@@ -694,8 +745,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                                         ),
                                       );
                                     }
-                                    final p =
-                                        _filteredPlaylists.value[index];
+                                    final p = _filteredPlaylists.value[index];
                                     return InkWell(
                                       key: ValueKey(p.guid),
                                       borderRadius: BorderRadius.circular(16),
@@ -733,29 +783,26 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                                                       final size = box.maxWidth
                                                           .clamp(
                                                             0.0,
-                                                            box.maxHeight
-                                                                .clamp(
-                                                                  0.0,
-                                                                  double
-                                                                      .infinity,
-                                                                ),
+                                                            box.maxHeight.clamp(
+                                                              0.0,
+                                                              double.infinity,
+                                                            ),
                                                           );
                                                       if (size <= 0) {
-                                                        return const SizedBox
-                                                            .shrink();
+                                                        return const SizedBox.shrink();
                                                       }
                                                       return Align(
                                                         alignment:
                                                             Alignment.topLeft,
                                                         child: _PlaylistCover(
                                                           coverId: p.coverId,
-                                                          updatedAt: p.updatedAt,
+                                                          updatedAt:
+                                                              p.updatedAt,
                                                           size: size,
                                                           borderRadius: 16,
                                                           playlistName: p.name,
                                                           placeholder:
-                                                              const SizedBox
-                                                                  .shrink(),
+                                                              const SizedBox.shrink(),
                                                         ),
                                                       );
                                                     },
@@ -778,22 +825,25 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                                       ),
                                     );
                                   },
-                                  childCount: _filteredPlaylists.value.length +
+                                  childCount:
+                                      _filteredPlaylists.value.length +
                                       (_loadingMore.value ? 1 : 0),
                                 ),
                                 gridDelegate:
                                     SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: _adaptiveGridColumns(context),
-                                  crossAxisSpacing: 14,
-                                  mainAxisSpacing:
-                                      _gridMainAxisSpacingForColumns(
-                                    _adaptiveGridColumns(context),
-                                  ),
-                                  childAspectRatio:
-                                      _gridAspectRatioForColumns(
-                                    _adaptiveGridColumns(context),
-                                  ),
-                                ),
+                                      crossAxisCount: _adaptiveGridColumns(
+                                        context,
+                                      ),
+                                      crossAxisSpacing: 14,
+                                      mainAxisSpacing:
+                                          _gridMainAxisSpacingForColumns(
+                                            _adaptiveGridColumns(context),
+                                          ),
+                                      childAspectRatio:
+                                          _gridAspectRatioForColumns(
+                                            _adaptiveGridColumns(context),
+                                          ),
+                                    ),
                               ),
                             ),
                           ],
@@ -922,7 +972,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
   }
 
   void _handleScroll() {
-    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value) return;
+    if (!_scrollController.hasClients || !_hasMore || _loadingMore.value)
+      return;
     final maxScroll = _scrollController.position.maxScrollExtent;
     final offset = _scrollController.offset;
     if (maxScroll - offset < 400) {
@@ -1132,8 +1183,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
       if (!mounted) return;
       final idSet = ids.toSet();
       _songs.value = _songs.value.where((s) => !idSet.contains(s.id)).toList();
-      _originalSongs.value =
-          _originalSongs.value.where((s) => !idSet.contains(s.id)).toList();
+      _originalSongs.value = _originalSongs.value
+          .where((s) => !idSet.contains(s.id))
+          .toList();
       _selectedIds.value = Set<String>.from(_selectedIds.value)
         ..removeAll(idSet);
       AppToast.show(context, '已移除 ${ids.length} 首');
@@ -1225,7 +1277,8 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                           controller: _scrollController,
                           padding: EdgeInsets.only(bottom: bottomInset),
                           itemCount:
-                              _songs.value.length + (_loadingMore.value ? 1 : 0),
+                              _songs.value.length +
+                              (_loadingMore.value ? 1 : 0),
                           itemBuilder: (context, index) {
                             if (index >= _songs.value.length) {
                               return const Center(
@@ -1461,18 +1514,31 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
 
         final tile = AppListTile(
           leading: SizedBox(
-            width: 48,
+            width: _multiSelect.value ? 76 : 48,
             height: 48,
             child: _multiSelect.value
-                ? Align(
-                    alignment: Alignment.centerLeft,
-                    child: Icon(
-                      isSelected ? Icons.check_circle : Icons.circle_outlined,
-                      size: 20,
-                      color: isSelected
-                          ? theme.colorScheme.primary
-                          : theme.disabledColor,
-                    ),
+                ? Row(
+                    children: [
+                      Icon(
+                        isSelected ? Icons.check_circle : Icons.circle_outlined,
+                        size: 20,
+                        color: isSelected
+                            ? theme.colorScheme.primary
+                            : theme.disabledColor,
+                      ),
+                      const SizedBox(width: 8),
+                      // 多选时封面仍保留，勾选圈放在封面左侧（与歌曲页一致）
+                      SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: _coverOrIndex(
+                          context,
+                          song,
+                          index,
+                          subtitleColor,
+                        ),
+                      ),
+                    ],
                   )
                 : _coverOrIndex(context, song, index, subtitleColor),
           ),
@@ -1528,17 +1594,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
 
         if (_multiSelect.value) return tile;
 
-        return Dismissible(
-          key: Key('playlist_${widget.playlistId}_${song.id}'),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            alignment: Alignment.centerRight,
-            color: Colors.red,
-            padding: const EdgeInsets.only(right: 20),
-            child: const Icon(Icons.delete, color: Colors.white),
-          ),
-          confirmDismiss: (direction) async {
-            return await showDialog<bool>(
+        return _SlideRevealAction(
+          child: tile,
+          onDelete: () async {
+            final confirmed = await showDialog<bool>(
               context: context,
               builder: (context) {
                 return AlertDialog(
@@ -1558,11 +1617,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
                 );
               },
             );
-          },
-          onDismissed: (direction) async {
+            if (confirmed != true) return false;
             await _removeSong(song);
+            return true;
           },
-          child: tile,
         );
       },
     );
@@ -1609,6 +1667,113 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage>
             color: Theme.of(context).colorScheme.primary,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 左滑露出「删除」按钮（iOS 式滑动操作）：行保持原位，右侧露出操作按钮，
+/// 点按钮执行 [onDelete]；右滑或点按钮后关闭。
+class _SlideRevealAction extends StatefulWidget {
+  final Widget child;
+  final Future<bool> Function() onDelete;
+
+  const _SlideRevealAction({required this.child, required this.onDelete});
+
+  @override
+  State<_SlideRevealAction> createState() => _SlideRevealActionState();
+}
+
+class _SlideRevealActionState extends State<_SlideRevealAction>
+    with SingleTickerProviderStateMixin {
+  static const double _actionWidth = 88;
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  )..addListener(() => setState(() {}));
+
+  /// 当前内容左移距离（0 = 闭合，[_actionWidth] = 完全露出删除按钮）。
+  double get _offset => _controller.value * _actionWidth;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _open() => _controller.forward();
+  void _close() => _controller.reverse();
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    // 左滑（dx<0）→ 左移量增大，露出删除按钮；右滑回收。
+    final next = _offset - details.delta.dx;
+    _controller.value = (next / _actionWidth).clamp(0.0, 1.0);
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    final vx = -details.velocity.pixelsPerSecond.dx; // 左滑速度为正
+    if (vx > 400 || _controller.value > 0.45) {
+      _open();
+    } else {
+      _close();
+    }
+  }
+
+  Future<void> _handleDelete() async {
+    final done = await widget.onDelete();
+    if (mounted && done) _close();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      child: Stack(
+        children: [
+          // 删除按钮（垫底，右对齐；内容左移后从右侧露出）
+          //
+          // 列表行背景透明（底层是渐变/背景图），按钮若常驻会从行下方透出，
+          // 因此透明度跟随滑动进度：闭合时完全隐藏，滑动时随行同步淡入。
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Opacity(
+                opacity: _controller.value,
+                child: Container(
+                  width: _actionWidth,
+                  height: double.infinity,
+                  color: Colors.red,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _handleDelete,
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.delete_outline_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '删除',
+                            style: TextStyle(color: Colors.white, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 前置内容：随滑动左移
+          Transform.translate(offset: Offset(-_offset, 0), child: widget.child),
+        ],
       ),
     );
   }
@@ -1700,19 +1865,30 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet>
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(6),
                                 child: CachedNetworkImage(
-                                  imageUrl: FeiNiuApiClient.instance
-                                      .coverUrl(p.coverId!, size: 48, updatedAt: p.updatedAt),
-                                  httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
+                                  imageUrl: FeiNiuApiClient.instance.coverUrl(
+                                    p.coverId!,
+                                    size: 48,
+                                    updatedAt: p.updatedAt,
+                                  ),
+                                  httpHeaders:
+                                      FeiNiuApiClient.imageAuthHeaders(),
                                   width: 40,
                                   height: 40,
                                   memCacheWidth: 40,
                                   memCacheHeight: 40,
                                   fit: BoxFit.cover,
-                                  errorWidget: (_, _, _) =>
-                                      Icon(Icons.queue_music_rounded, color: Theme.of(context).colorScheme.primary),
+                                  errorWidget: (_, _, _) => Icon(
+                                    Icons.queue_music_rounded,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
                                 ),
                               )
-                            : Icon(Icons.queue_music_rounded, color: Theme.of(context).colorScheme.primary),
+                            : Icon(
+                                Icons.queue_music_rounded,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                         title: Text(
                           p.name,
                           maxLines: 1,
@@ -1776,7 +1952,8 @@ Future<bool> showAddToPlaylistDialog(
                   itemBuilder: (context, index) {
                     final playlist = playlists[index];
                     return AppListTile(
-                      leading: playlist.coverId != null &&
+                      leading:
+                          playlist.coverId != null &&
                               playlist.coverId!.isNotEmpty
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(6),
@@ -1851,6 +2028,216 @@ Future<void> _showPlaylistNameDialog(
       );
     },
   );
+}
+
+/// 导入歌单对话框（手机友好）：加高多行输入框展示完整链接、一键从剪贴板粘贴、
+/// 粘贴后识别平台提示。返回提取出的歌单链接，取消返回 null。
+class _PlaylistImportDialog extends StatefulWidget {
+  const _PlaylistImportDialog();
+
+  @override
+  State<_PlaylistImportDialog> createState() => _PlaylistImportDialogState();
+}
+
+class _PlaylistImportDialogState extends State<_PlaylistImportDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 从粘贴文本提取首个 http(s) 链接（分享文本常带描述/成对符号）。
+  String _extractUrl(String raw) {
+    final text = raw.trim();
+    if (RegExp(r'^https?://', caseSensitive: false).hasMatch(text)) {
+      return text;
+    }
+    final m = RegExp(
+      r'https?://[^\s，。；、]+',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (m == null) return text;
+    return m
+        .group(0)!
+        .replaceAll(RegExp(r'[）)】\]，,]+$'), '')
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .trim();
+  }
+
+  /// 客户端平台识别提示（仅展示用；短链识别不出仍可正常导入）。
+  String? _detectPlatform(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('163.com') || u.contains('163cn')) return '网易云';
+    if (u.contains('y.qq.com') || u.contains('qqmusic')) return 'QQ音乐';
+    if (u.contains('kugou.com')) return '酷狗';
+    if (u.contains('kuwo.cn')) return '酷我';
+    return null;
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) return;
+    setState(() {
+      _controller.text = _extractUrl(text);
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    });
+  }
+
+  void _submit() {
+    final url = _extractUrl(_controller.text);
+    if (url.isEmpty) return;
+    Navigator.of(context).pop(url);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final backgroundColor =
+        theme.dialogTheme.backgroundColor ?? theme.colorScheme.surface;
+    final url = _controller.text.trim();
+    final detected = _detectPlatform(url);
+
+    return Dialog(
+      backgroundColor: backgroundColor,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        // minWidth 不能为 Infinity（会抛 BoxConstraints 非法约束）；
+        // 用 SizedBox(width: double.infinity) 占满可用宽度、再由本约束封顶 440。
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: SizedBox(
+          width: double.infinity,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '导入歌单',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '粘贴网易云 / QQ音乐 / 酷狗 / 酷我歌单链接',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: theme.textTheme.bodyMedium?.color?.withValues(
+                        alpha: 0.8,
+                      ),
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    minLines: 3,
+                    maxLines: 5,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textInputAction: TextInputAction.done,
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _submit(),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'https://music.163.com/...',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: '从剪贴板粘贴',
+                        icon: const Icon(Icons.content_paste_go_rounded),
+                        onPressed: _pasteFromClipboard,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (url.isEmpty)
+                    const SizedBox(height: 14)
+                  else if (detected != null)
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 15,
+                          color: Colors.green.shade600,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '已识别：$detected 歌单',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.green.shade700,
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    Text(
+                      '未识别到平台（短链仍可导入）',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 44,
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              backgroundColor: isDark
+                                  ? Colors.white.withValues(alpha: 0.08)
+                                  : Colors.grey.withValues(alpha: 0.1),
+                              foregroundColor: isDark
+                                  ? Colors.white70
+                                  : Colors.black87,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('取消'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: SizedBox(
+                          height: 44,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.primaryColor,
+                              foregroundColor: theme.colorScheme.onPrimary,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                            ),
+                            onPressed: url.isEmpty ? null : _submit,
+                            child: const Text('导入'),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _PlaylistNameDialog extends StatefulWidget {
@@ -1929,8 +2316,9 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
 
     setState(() {}); // 关闭加载态
     try {
-      final coverId = await FeiNiuPlaylistService.instance
-          .uploadCoverFromFile(cropped.path);
+      final coverId = await FeiNiuPlaylistService.instance.uploadCoverFromFile(
+        cropped.path,
+      );
       if (!mounted) return;
       setState(() => _coverId = coverId);
       widget.onCoverUploaded?.call(coverId);
@@ -2016,8 +2404,7 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
                               _coverId!,
                               size: 200,
                             ),
-                            httpHeaders:
-                                FeiNiuApiClient.imageAuthHeaders(),
+                            httpHeaders: FeiNiuApiClient.imageAuthHeaders(),
                             fit: BoxFit.cover,
                             errorWidget: (_, _, _) => _coverPlaceholder(),
                           ),
