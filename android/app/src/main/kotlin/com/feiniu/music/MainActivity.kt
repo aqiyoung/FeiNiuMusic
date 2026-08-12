@@ -329,6 +329,37 @@ class MainActivity : AudioServiceActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.feiniu.music/floating_island"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "show" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val lyric = call.argument<String>("lyric") ?: ""
+                    val coverPath = call.argument<String>("coverPath")
+                    val isPlaying = call.argument<Boolean>("isPlaying") ?: true
+                    overlayFloatingIsland.show(title, artist, lyric, coverPath, isPlaying)
+                    result.success(null)
+                }
+                "update" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val lyric = call.argument<String>("lyric") ?: ""
+                    val isPlaying = call.argument<Boolean>("isPlaying") ?: true
+                    overlayFloatingIsland.update(title, artist, lyric, isPlaying)
+                    result.success(null)
+                }
+                "hide" -> {
+                    overlayFloatingIsland.hide()
+                    result.success(null)
+                }
+                "hasOverlayPermission" -> result.success(overlayFloatingIsland.hasOverlayPermission())
+                "openOverlaySettings" -> result.success(overlayFloatingIsland.openOverlaySettings())
+                else -> result.notImplemented()
+            }
+        }
 
         // 数据源插件（Lyrico 搜索源）JS 执行通道。Dart 层传入拼接好的脚本与
         // 请求 JSON，Kotlin 在后台线程跑 QuickJS 并返回插件原始返回值。
@@ -628,6 +659,11 @@ class MainActivity : AudioServiceActivity() {
 
     private val overlayTrackChange: OverlayTrackChange by lazy {
         OverlayTrackChange(applicationContext)
+    }
+
+    /** 浮窗灵动岛（官方 LOGO 常驻歌词浮窗）单一实例。 */
+    private val overlayFloatingIsland: OverlayFloatingIsland by lazy {
+        OverlayFloatingIsland(applicationContext)
     }
 
     /** Shizuku 授权探测作用域（后台协程，避免阻塞主线程导致授权时闪退）。 */

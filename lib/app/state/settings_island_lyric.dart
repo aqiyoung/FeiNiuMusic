@@ -18,6 +18,7 @@ class IslandLyricSettings {
   static const String _prefsNotificationType = 'island_lyric_notification_type';
   static const String _prefsBypassFocusLimit = 'island_lyric_bypass_focus_limit';
   static const String _prefsMigratedFocusV2 = 'island_lyric_migrated_focus_v2';
+  static const String _prefsFloatingIsland = 'island_lyric_floating_island';
 
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
   static final ValueNotifier<bool> showProgress = ValueNotifier(true);
@@ -39,6 +40,11 @@ class IslandLyricSettings {
   /// XMSF 网络，使未在白名单内的应用也能渲染焦点通知。默认关闭。仅对
   /// [typeFocus] 生效（实时通知无需白名单）。
   static final ValueNotifier<bool> bypassFocusLimit = ValueNotifier(false);
+
+  /// 浮窗灵动岛（官方 LOGO 常驻歌词浮窗）：开启后用应用内悬浮窗自行绘制官方
+  /// 图标 + 歌词，完全绕开系统通知链路（live 紫底圆 / 焦点需白名单的坑），
+  /// 稳定显示全彩官方 LOGO。需 SYSTEM_ALERT_WINDOW（悬浮窗）权限。默认关闭。
+  static final ValueNotifier<bool> floatingIsland = ValueNotifier(false);
 
   static Future<void>? _loading;
 
@@ -66,6 +72,7 @@ class IslandLyricSettings {
     }
     notificationType.value = loadedType;
     bypassFocusLimit.value = prefs.getBool(_prefsBypassFocusLimit) ?? false;
+    floatingIsland.value = prefs.getBool(_prefsFloatingIsland) ?? false;
   }
 
   static Future<void> setEnabled(bool value) async {
@@ -106,6 +113,13 @@ class IslandLyricSettings {
     bypassFocusLimit.value = value;
   }
 
+  /// 设置是否启用浮窗灵动岛（官方 LOGO 常驻歌词浮窗）。
+  static Future<void> setFloatingIsland(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsFloatingIsland, value);
+    floatingIsland.value = value;
+  }
+
   /// 测试专用：重置内存状态（清空懒加载缓存），供测试 setUp 复用。
   static void resetForTest() {
     _loading = null;
@@ -115,5 +129,6 @@ class IslandLyricSettings {
     aodLyrics.value = false;
     notificationType.value = typeLive;
     bypassFocusLimit.value = false;
+    floatingIsland.value = false;
   }
 }

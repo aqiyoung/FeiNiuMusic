@@ -33,6 +33,11 @@ class IslandLyricService {
     'com.feiniu.music/island_lyric_shizuku',
   );
 
+  /// 浮窗灵动岛通道：常驻显示官方 LOGO + 歌词，完全绕开系统通知链路。
+  static const MethodChannel _floatingChannel = MethodChannel(
+    'com.feiniu.music/floating_island',
+  );
+
   /// 探测 Shizuku 授权状态：服务运行且权限已授予。未授权时会拉起系统授权弹窗。
   /// 用于「Shizuku 绕过白名单」开关打开前的授权检查。失败按未授权处理。
   static Future<bool> checkShizukuGranted() async {
@@ -49,6 +54,26 @@ class IslandLyricService {
   static Future<bool> openAodSettings() async {
     try {
       final ok = await _channel.invokeMethod<bool>('openAodSettings');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 浮窗灵动岛（官方 LOGO 浮窗）是否拥有 SYSTEM_ALERT_WINDOW 权限。
+  static Future<bool> canDrawOverlay() async {
+    try {
+      final ok = await _floatingChannel.invokeMethod<bool>('hasOverlayPermission');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 跳转到系统「悬浮窗权限」设置页（授予 SYSTEM_ALERT_WINDOW）。
+  static Future<bool> openOverlaySettings() async {
+    try {
+      final ok = await _floatingChannel.invokeMethod<bool>('openOverlaySettings');
       return ok ?? false;
     } catch (_) {
       return false;
@@ -150,6 +175,7 @@ class IslandLyricService {
     IslandLyricSettings.aodLyrics.addListener(_onSettingsChanged);
     IslandLyricSettings.notificationType.addListener(_onSettingsChanged);
     IslandLyricSettings.bypassFocusLimit.addListener(_onSettingsChanged);
+    IslandLyricSettings.floatingIsland.addListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.addListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.addListener(_onPlayingChanged);
     PlayerService.instance.position.addListener(_onPositionChanged);
@@ -166,6 +192,7 @@ class IslandLyricService {
     IslandLyricSettings.aodLyrics.removeListener(_onSettingsChanged);
     IslandLyricSettings.notificationType.removeListener(_onSettingsChanged);
     IslandLyricSettings.bypassFocusLimit.removeListener(_onSettingsChanged);
+    IslandLyricSettings.floatingIsland.removeListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.removeListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.removeListener(_onPlayingChanged);
     PlayerService.instance.position.removeListener(_onPositionChanged);
@@ -498,7 +525,7 @@ class IslandLyricService {
 
   static void _onPositionChanged() {
     final enabled = IslandLyricSettings.enabled.value;
-    if (!enabled) return;
+    if (!enabled && !IslandLyricSettings.floatingIsland.value) return;
     final isPlaying = PlayerService.instance.isPlaying.value;
     final lyricLine = LyricsService.instance.currentLineText.value;
     if (!shouldShow(enabled: true, isPlaying: isPlaying, lyricLine: lyricLine)) {
@@ -549,11 +576,12 @@ class IslandLyricService {
   /// 汇总当前状态并驱动原生层（歌词行 / 播放状态 / 开关变化时调用）。
   static void _syncLyric() {
     final enabled = IslandLyricSettings.enabled.value;
+    final floatingEnabled = IslandLyricSettings.floatingIsland.value;
     final isPlaying = PlayerService.instance.isPlaying.value;
     final lyricLine = LyricsService.instance.currentLineText.value;
 
     if (!shouldShow(
-      enabled: enabled,
+      enabled: enabled || floatingEnabled,
       isPlaying: isPlaying,
       lyricLine: lyricLine,
     )) {
@@ -565,6 +593,7 @@ class IslandLyricService {
         _lastNotificationType = IslandLyricSettings.typeLive;
         _lastBypassFocusLimit = false;
         _channel.invokeMethod('hide');
+        _floatingChannel.invokeMethod('hide');
       }
       return;
     }
@@ -680,7 +709,20 @@ class IslandLyricService {
     // 记录本次发送用的绕过状态（供切换绕过开关时即时重发判定）
     _lastBypassFocusLimit = IslandLyricSettings.bypassFocusLimit.value;
 
-    _channel.invokeMethod('update', payload);
+    // 通知歌词灵动岛：仅在该开关打开时驱动系统通知（否则不发，避免误上岛）。
+    if (IslandLyricSettings.enabled.value) {
+      _channel.invokeMethod('update', payload);
+    }
+    // 浮窗灵动岛：官方 LOGO + 歌词常驻浮窗，绕开系统通知链路。整行歌词交给
+    // 浮窗自行跑马灯，不拆帧。
+    if (IslandLyricSettings.floatingIsland.value) {
+      _floatingChannel.invokeMethod('update', {
+        'title': song?.title ?? '',
+        'artist': song?.artistDisplayName ?? '',
+        'lyric': lyricLine ?? '',
+        'isPlaying': player.isPlaying.value,
+      });
+    }
   }
 
   /// 构建发送给原生层的 update payload（纯函数，可测）。

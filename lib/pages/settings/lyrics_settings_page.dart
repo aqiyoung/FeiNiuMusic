@@ -146,6 +146,25 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
     await IslandLyricSettings.setBypassFocusLimit(value);
   }
 
+  /// 切换「浮窗灵动岛（官方LOGO）」：开启前先检查悬浮窗权限，
+  /// 未授予则跳转到系统设置页引导用户开启，开启后再真正启用。
+  Future<void> _setFloatingIsland(bool value) async {
+    if (value) {
+      final granted = await IslandLyricService.canDrawOverlay();
+      if (!mounted) return;
+      if (!granted) {
+        await IslandLyricService.openOverlaySettings();
+        AppToast.show(
+          context,
+          '请在本应用设置中开启「悬浮窗」权限后重试',
+          type: ToastType.info,
+        );
+        return;
+      }
+    }
+    await IslandLyricSettings.setFloatingIsland(value);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Watch.builder(
@@ -234,9 +253,28 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
     final caps = _capabilities.value;
     final liveAvailable = caps.liveEnabled;
     final focusAvailable = caps.focusEnabled;
-    if (!liveAvailable && !focusAvailable) return const [];
 
-    return [
+    // 浮窗灵动岛（官方 LOGO）：应用内悬浮窗自行绘制官方图标 + 歌词，
+    // 完全绕开系统通知链路（live 紫底圆 / 焦点需白名单），不依赖实时/焦点
+    // 系统能力，稳定显示全彩官方 LOGO。该开关始终可选。
+    final List<Widget> tiles = [
+      ValueListenableBuilder<bool>(
+        valueListenable: IslandLyricSettings.floatingIsland,
+        builder: (context, floating, _) {
+          return AppSettingSwitchTile(
+            title: '浮窗灵动岛（官方LOGO）',
+            subtitle: '用应用内悬浮窗自行绘制官方图标 + 歌词，绕开系统通知，'
+                '稳定显示全彩官方 LOGO（需授予「悬浮窗」权限，免 Shizuku）',
+            value: floating,
+            onChanged: _setFloatingIsland,
+          );
+        },
+      ),
+    ];
+
+    if (!liveAvailable && !focusAvailable) return tiles;
+
+    tiles.addAll([
       ValueListenableBuilder<bool>(
         valueListenable: IslandLyricSettings.enabled,
         builder: (context, enabled, _) {
@@ -423,6 +461,8 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
           );
         },
       ),
-    ];
+    ]);
+
+    return tiles;
   }
 }
