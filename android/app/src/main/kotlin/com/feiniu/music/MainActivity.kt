@@ -31,6 +31,7 @@ import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import com.feiniu.music.island.IslandLyricNotification
 import com.feiniu.music.island.shizuku.ShizukuManager
+import com.feiniu.music.track_change.OverlayFloatingIsland
 import com.feiniu.music.track_change.OverlayTrackChange
 import com.feiniu.music.R
 import kotlinx.coroutines.CoroutineScope
