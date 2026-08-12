@@ -116,7 +116,7 @@ class OverlayFloatingIsland(private val context: Context) {
             lyricView?.text = lyric
             titleView?.text = title
             artistView?.text = if (artist.isEmpty()) "" else "· $artist"
-            applyExpanded(view, expanded)
+            overlayView?.let { applyExpanded(it, expanded) }
             // 跑马灯需要视图可见后重新触发选中状态
             lyricView?.isSelected = isPlaying
         } catch (e: Exception) {
