@@ -165,3 +165,32 @@ jobs:
             android-artifact/FeiNiuMusic-v*.apk
             android-artifact/FnMusicEnhance-*.fpk
             windows-artifact/**/FeiNiuMusic-Windows-*.zip
+
+      - name: 推送新版本到 Telegram（私人）
+        # 参照 sanyelive release.yml 的 Telegram 推送步骤：构建成功才发，发 3 架构 APK 直链 + 构建日志。
+        # 机密 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 需在仓库 Settings 配置。
+        if: success()
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -e
+          TAG="v${{ env.VERSION }}"
+          PROXY="https://gh-proxy.com/"
+          DL_BASE="https://github.com/aqiyoung/FeiNiuMusic/releases/download/${TAG}/FeiNiuMusic-v${{ env.VERSION }}"
+          LOG_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/logs"
+          {
+            echo "📦 FeiNiuMusic $TAG 构建成功"
+            echo ""
+            echo "APK 下载（3 架构，按设备选装）："
+            echo "• arm64-v8a（首选）：${PROXY}${DL_BASE}-arm64-v8a.apk"
+            echo "• armeabi-v7a：${PROXY}${DL_BASE}-armeabi-v7a.apk"
+            echo "• x86_64：${PROXY}${DL_BASE}-x86_64.apk"
+            echo ""
+            echo "构建日志：${LOG_URL}"
+          } > /tmp/msg.txt
+          cat /tmp/msg.txt
+          curl -f -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT:-460212872}" \
+            --data-urlencode "text=$(cat /tmp/msg.txt)" \
+            || echo "::error::Telegram 推送失败 — 检查 TELEGRAM_BOT_TOKEN 是否有效、chat_id 是否与你 /start 过该 bot"
