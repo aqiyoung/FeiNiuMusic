@@ -2,7 +2,9 @@ package com.feiniu.music.track_change
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.LinearGradient
 import android.graphics.PixelFormat
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -222,6 +224,22 @@ class OverlayFloatingIsland(private val context: Context) {
             ellipsize = TextUtils.TruncateAt.MARQUEE
             marqueeRepeatLimit = -1
             isSelected = true
+        }
+        // 歌词彩色渐变文字（粉→紫→青），仅着色文字本身；不影响背景透明度。
+        // 布局完成拿到实际宽度后再挂 shader（首帧前宽度可能为 0）。
+        lyric.viewTreeObserver.addOnGlobalLayoutListener {
+            if (lyric.width > 0 && lyric.paint.shader == null) {
+                lyric.paint.shader = LinearGradient(
+                    0f, 0f, lyric.width.toFloat(), 0f,
+                    intArrayOf(
+                        0xFF8E54E9.toInt(), // 紫
+                        0xFFE040FB.toInt(), // 品红
+                        0xFF00E5FF.toInt()  // 青
+                    ),
+                    null,
+                    Shader.TileMode.CLAMP
+                )
+            }
         }
         val sub = TextView(context).apply {
             subView = this
