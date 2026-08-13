@@ -1,8 +1,8 @@
 package com.feiniu.music.track_change
 
-import com.feiniu.music.R
 import android.content.Context
 import android.content.Intent
+import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -10,41 +10,56 @@ import android.os.Build
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlin.math.abs
 
 /**
- * 浮窗灵动岛（常驻歌词浮窗）。
+ * 桌面歌词浮窗。
  *
- * 与 [OverlayTrackChange]（切歌提示，限时自动消失）不同，本浮窗在「正在播放且
- * 有歌词」期间常驻显示，收起态为顶部居中的胶囊：左侧官方应用图标
- * （[R.mipmap.ic_launcher]，全彩、不经系统 tint）+ 当前歌词（跑马灯）+
- * 歌名·歌手（次级色）+ 关闭按钮。点击胶囊主体在「收起 / 展开」间切换：展开态
- * 显示更大的官方 LOGO + 歌名（粗体）+ 歌手。
+ * 取代原「浮窗灵动岛」胶囊，改为屏幕底部居中的桌面歌词横条：大号居中歌词
+ * （跑马灯）+ 次要色的歌名·歌手 + 关闭按钮。整体半透明，透明度由 [opacity]
+ * （0.0~1.0）控制。
  *
- * 用途：HyperOS 实时通知的 smallIcon 会被系统强制单色 + 圆底，无法显示全彩官方
- * LOGO；焦点通知虽能显示 pic_logo 全彩图标，但需系统白名单（常需 Shizuku 绕过）。
- * 本浮窗完全绕开系统通知链路，自行绘制官方 LOGO，稳定可靠、零白名单依赖。
+ * 交互：
+ * - 拖动：手指按住浮窗可移动位置（更新 [WindowManager] 布局参数 x/y）。
+ * - 双击：锁定 / 解锁。锁定后禁止拖动并隐藏关闭按钮，避免误触；再次双击解锁。
+ * - 单击关闭按钮：隐藏浮窗。
  *
- * 所有 WindowManager 操作 try/catch：权限被撤销 / Activity 销毁时不崩溃。
+ * 完全绕开系统通知链路，稳定可靠、零白名单依赖。所有 [WindowManager] 操作均
+ * try/catch：权限被撤销 / Activity 销毁时不崩溃。
  */
 class OverlayFloatingIsland(private val context: Context) {
 
     companion object {
         private const val TAG = "OverlayFloatingIsland"
+        /** 双击判定窗口（毫秒）。 */
+        private const val DOUBLE_TAP_MS = 300L
+        /** 触发拖动的位移阈值（像素）。 */
+        private const val DRAG_THRESHOLD_PX = 6
     }
 
     private val windowManager =
         context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var overlayView: View? = null
-    private var logoView: ImageView? = null
     private var lyricView: TextView? = null
-    private var titleView: TextView? = null
-    private var artistView: TextView? = null
-    private var expanded = false
+    private var subView: TextView? = null
+    private var closeView: View? = null
+    private var lockIndicator: View? = null
+    private var wmParams: WindowManager.LayoutParams? = null
+    private var barWidth = 0
+    private var locked = false
+
+    // 拖动 / 双击状态
+    private var dragging = false
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var lastTapTime = 0L
 
     fun hasOverlayPermission(): Boolean = Settings.canDrawOverlays(context)
 
@@ -61,15 +76,16 @@ class OverlayFloatingIsland(private val context: Context) {
     }
 
     /**
-     * 显示 / 刷新浮窗。视图首次创建，后续 update 在原视图上就地刷新文本与图标，
-     * 不重建窗口（保留展开/收起状态、不闪烁）。[coverPath] 暂未使用（保持官方 LOGO 恒定）。
+     * 显示 / 刷新桌面歌词。视图首次创建，后续 update 在原视图上就地刷新文本、
+     * 透明度与锁定态，不重建窗口（保留拖动位置、不闪烁）。
      */
     fun show(
         title: String,
         artist: String,
         lyric: String,
         coverPath: String?,
-        isPlaying: Boolean
+        isPlaying: Boolean,
+        opacity: Float
     ) {
         if (!hasOverlayPermission()) {
             android.util.Log.w(TAG, "无悬浮窗权限，忽略 show")
@@ -78,8 +94,10 @@ class OverlayFloatingIsland(private val context: Context) {
         val density = context.resources.displayMetrics.density
         if (overlayView == null) {
             overlayView = buildView().also { view ->
-                val wmParams = WindowManager.LayoutParams(
-                    fixedWidth(density),
+                val w = fixedWidth(density)
+                barWidth = w
+                wmParams = WindowManager.LayoutParams(
+                    w,
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -88,37 +106,49 @@ class OverlayFloatingIsland(private val context: Context) {
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    android.graphics.PixelFormat.TRANSLUCENT
+                    PixelFormat.TRANSLUCENT
                 ).apply {
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    y = statusBarHeight() + 12.dpToPx(context)
+                    gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    x = 0
+                    y = (16 * density).toInt() // 距屏幕底部 16dp
                 }
                 try {
                     windowManager.addView(view, wmParams)
                 } catch (e: Exception) {
                     android.util.Log.w(TAG, "浮窗 addView 失败", e)
                     overlayView = null
+                    wmParams = null
                     return
                 }
             }
         }
-        update(title, artist, lyric, isPlaying)
+        update(title, artist, lyric, isPlaying, opacity)
     }
 
-    /** 就地刷新文本 / 图标，不重建窗口。视图尚未创建时先 [show] 建立。 */
-    fun update(title: String, artist: String, lyric: String, isPlaying: Boolean) {
+    /** 就地刷新文本 / 透明度 / 锁定态，不重建窗口。视图尚未创建时先 [show]。 */
+    fun update(
+        title: String,
+        artist: String,
+        lyric: String,
+        isPlaying: Boolean,
+        opacity: Float
+    ) {
         if (overlayView == null) {
-            show(title, artist, lyric, null, isPlaying)
+            show(title, artist, lyric, null, isPlaying, opacity)
             return
         }
         try {
-            logoView?.setImageResource(R.mipmap.ic_launcher)
             lyricView?.text = lyric
-            titleView?.text = title
-            artistView?.text = if (artist.isEmpty()) "" else "· $artist"
-            overlayView?.let { applyExpanded(it, expanded) }
-            // 跑马灯需要视图可见后重新触发选中状态
             lyricView?.isSelected = isPlaying
+            val sub = if (title.isEmpty() && artist.isEmpty()) {
+                ""
+            } else {
+                "$title${if (artist.isEmpty()) "" else " · $artist"}"
+            }
+            subView?.text = sub
+            // 整体半透明：透明度作用于根视图，歌词与背景一并可调。
+            overlayView?.alpha = opacity.coerceIn(0f, 1f)
+            applyLocked(locked)
         } catch (e: Exception) {
             android.util.Log.w(TAG, "浮窗刷新失败", e)
         }
@@ -127,10 +157,13 @@ class OverlayFloatingIsland(private val context: Context) {
     fun hide() {
         val view = overlayView ?: return
         overlayView = null
-        logoView = null
         lyricView = null
-        titleView = null
-        artistView = null
+        subView = null
+        closeView = null
+        lockIndicator = null
+        wmParams = null
+        locked = false
+        dragging = false
         try {
             windowManager.removeView(view)
         } catch (e: Exception) {
@@ -143,8 +176,8 @@ class OverlayFloatingIsland(private val context: Context) {
     private fun buildView(): View {
         val density = context.resources.displayMetrics.density
 
-        // 深色卡片（让官方 LOGO 的红底更醒目），圆角 + 边框 + 悬浮阴影
-        val radius = 18.dp(density).toFloat()
+        // 深色卡片（让歌词更醒目），圆角 + 边框 + 悬浮阴影
+        val radius = 16.dp(density).toFloat()
         val cardColorTop = 0xFF2A2E35.toInt()
         val cardColorBottom = 0xFF20242A.toInt()
         val borderColor = 0x1FFFFFFF.toInt()
@@ -154,7 +187,7 @@ class OverlayFloatingIsland(private val context: Context) {
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(10.dp(density), 8.dp(density), 8.dp(density), 8.dp(density))
+            setPadding(16.dp(density), 12.dp(density), 12.dp(density), 12.dp(density))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(cardColorTop, cardColorBottom)
@@ -164,83 +197,69 @@ class OverlayFloatingIsland(private val context: Context) {
                 setStroke((0.8f * density).toInt(), borderColor)
             }
             elevation = 12.dp(density).toFloat()
-            setOnClickListener { toggleExpand() }
+            setOnTouchListener(touchListener)
         }
 
-        // 官方全彩 LOGO：直接用应用图标资源，零处理、不被系统 tint。
-        val logoSize = 38.dp(density)
-        val logo = ImageView(context).apply {
-            logoView = this
-            setImageResource(R.mipmap.ic_launcher)
-            // 圆形裁剪背景（与动态岛胶囊观感一致）；图标本身自带圆角方底，
-            // 套一层圆形遮罩让它在胶囊里更协调。
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0x00000000)
-            }
-            clipToOutline = false
-        }
-        root.addView(
-            logo,
-            LinearLayout.LayoutParams(logoSize, logoSize).apply {
-                setMargins(0, 0, 10.dp(density), 0)
-            }
-        )
-
-        // 文本列：歌词（主，跑马灯）+ 歌名（粗体，展开时显示）+ 歌手（次级色）
+        // 文本列：大号居中歌词 + 次要色歌名·歌手（桌面歌词居中观感）
         val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
+            gravity = Gravity.CENTER
         }
         val lyric = TextView(context).apply {
             lyricView = this
-            textSize = 14f
+            textSize = 18f
             setTextColor(textColor)
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.MARQUEE
             marqueeRepeatLimit = -1
             isSelected = true
         }
-        val title = TextView(context).apply {
-            titleView = this
-            textSize = 13f
-            setTextColor(textColor)
-            setTypeface(null, Typeface.BOLD)
-            setSingleLine(true)
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        val artist = TextView(context).apply {
-            artistView = this
-            textSize = 11f
+        val sub = TextView(context).apply {
+            subView = this
+            textSize = 12f
             setTextColor(secondaryColor)
+            gravity = Gravity.CENTER
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.END
         }
         textColumn.addView(lyric)
-        textColumn.addView(title)
-        textColumn.addView(artist)
+        textColumn.addView(sub)
         root.addView(
             textColumn,
             LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f)
         )
 
-        // 关闭按钮：×，点击隐藏
-        val closeBtn = TextView(context).apply {
-            text = "×"
+        // 锁定指示（默认隐藏）：锁定态显示，提示「双击解锁」
+        val lock = TextView(context).apply {
+            lockIndicator = this
+            text = "锁"
+            textSize = 13f
             setTextColor(secondaryColor)
-            textSize = 20f
             gravity = Gravity.CENTER
-            setPadding(6.dp(density), 6.dp(density), 6.dp(density), 6.dp(density))
-            setOnClickListener {
-                hide()
-            }
-        }
-        // 阻止关闭按钮的点击冒泡到 root（避免误触展开）
-        closeBtn.setOnClickListener {
-            hide()
+            visibility = View.GONE
         }
         root.addView(
-            closeBtn,
+            lock,
+            LinearLayout.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(8.dp(density), 0, 0, 0) }
+        )
+
+        // 关闭按钮：×，点击隐藏
+        val close = TextView(context).apply {
+            closeView = this
+            text = "×"
+            setTextColor(secondaryColor)
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setPadding(8.dp(density), 8.dp(density), 8.dp(density), 8.dp(density))
+            setOnClickListener { hide() }
+        }
+        root.addView(
+            close,
             LinearLayout.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT
@@ -250,27 +269,73 @@ class OverlayFloatingIsland(private val context: Context) {
         return root
     }
 
-    private fun toggleExpand() {
-        expanded = !expanded
-        overlayView?.let { applyExpanded(it, expanded) }
+    /** 触摸监听：拖动移动位置、双击锁定 / 解锁。 */
+    private val touchListener = View.OnTouchListener { view, event ->
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                if (!locked) {
+                    downX = event.rawX
+                    downY = event.rawY
+                    lastTouchX = event.rawX
+                    lastTouchY = event.rawY
+                    dragging = false
+                }
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (locked) return@OnTouchListener true
+                val dx = event.rawX - lastTouchX
+                val dy = event.rawY - lastTouchY
+                if (!dragging &&
+                    (abs(event.rawX - downX) > DRAG_THRESHOLD_PX ||
+                        abs(event.rawY - downY) > DRAG_THRESHOLD_PX)
+                ) {
+                    dragging = true
+                }
+                if (dragging && wmParams != null) {
+                    wmParams!!.x += dx.toInt()
+                    // BOTTOM 重力下，y 为距底部偏移，手指下移（dy>0）应使 y 减小
+                    wmParams!!.y -= dy.toInt()
+                    clampParams(wmParams!!)
+                    windowManager.updateViewLayout(view, wmParams)
+                }
+                lastTouchX = event.rawX
+                lastTouchY = event.rawY
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                val now = System.currentTimeMillis()
+                if (!dragging && now - lastTapTime < DOUBLE_TAP_MS) {
+                    toggleLock()
+                    lastTapTime = 0
+                } else {
+                    lastTapTime = if (dragging) 0 else now
+                }
+                dragging = false
+                true
+            }
+            else -> false
+        }
     }
 
-    /** 根据展开状态切换歌名/歌手可见性与 LOGO 尺寸。 */
-    private fun applyExpanded(view: View, isExpanded: Boolean) {
-        // 文本列是 root 的第 2 个子视图（logo 之后）
-        val textColumn = (view as? LinearLayout)?.getChildAt(1) as? LinearLayout ?: return
-        val lyric = textColumn.getChildAt(0) as? TextView
-        val title = textColumn.getChildAt(1) as? TextView
-        val artist = textColumn.getChildAt(2) as? TextView
-        if (isExpanded) {
-            title?.visibility = View.VISIBLE
-            artist?.visibility = View.VISIBLE
-            lyric?.textSize = 13f
-        } else {
-            title?.visibility = View.GONE
-            artist?.visibility = View.GONE
-            lyric?.textSize = 14f
-        }
+    private fun toggleLock() {
+        locked = !locked
+        applyLocked(locked)
+    }
+
+    /** 锁定态：隐藏关闭按钮、显示锁定指示；解锁反之。 */
+    private fun applyLocked(isLocked: Boolean) {
+        closeView?.visibility = if (isLocked) View.GONE else View.VISIBLE
+        lockIndicator?.visibility = if (isLocked) View.VISIBLE else View.GONE
+    }
+
+    /** 限制拖动范围：水平不超过屏幕两侧，垂直不越过屏幕 80% 高度且不低于底部。 */
+    private fun clampParams(p: WindowManager.LayoutParams) {
+        val screenW = context.resources.displayMetrics.widthPixels
+        val screenH = context.resources.displayMetrics.heightPixels
+        val maxX = (p.width / 2).coerceAtMost((screenW / 2))
+        p.x = p.x.coerceIn(-maxX, maxX)
+        p.y = p.y.coerceIn(0, (screenH * 0.8).toInt())
     }
 
     private fun fixedWidth(density: Float): Int {
@@ -281,13 +346,4 @@ class OverlayFloatingIsland(private val context: Context) {
     }
 
     private fun Int.dp(density: Float) = (this * density).toInt()
-
-    private fun Int.dpToPx(context: Context): Int =
-        (this * context.resources.displayMetrics.density).toInt()
-
-    private fun statusBarHeight(): Int {
-        val res = context.resources
-        val id = res.getIdentifier("status_bar_height", "dimen", "android")
-        return if (id > 0) res.getDimensionPixelSize(id) else 0
-    }
 }
