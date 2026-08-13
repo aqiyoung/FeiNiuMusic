@@ -21,8 +21,8 @@ import kotlin.math.abs
  * 桌面歌词浮窗。
  *
  * 取代原「浮窗灵动岛」胶囊，改为屏幕底部居中的桌面歌词横条：大号居中歌词
- * （跑马灯）+ 次要色的歌名·歌手 + 关闭按钮。整体半透明，透明度由 [opacity]
- * （0.0~1.0）控制。
+ * （跑马灯）+ 次要色的歌名·歌手 + 关闭按钮。卡片背景半透明，透明度由 [opacity]
+ * （0.0~1.0）控制，仅作用于背景；歌词文字始终不透明清晰可读。
  *
  * 交互：
  * - 拖动：手指按住浮窗可移动位置（更新 [WindowManager] 布局参数 x/y）。
@@ -52,6 +52,8 @@ class OverlayFloatingIsland(private val context: Context) {
     private var wmParams: WindowManager.LayoutParams? = null
     private var barWidth = 0
     private var locked = false
+    /** 卡片背景（GradientDrawable）。透明度仅作用于此，歌词文字保持不透明。 */
+    private var cardBackground: GradientDrawable? = null
 
     // 拖动 / 双击状态
     private var dragging = false
@@ -146,8 +148,9 @@ class OverlayFloatingIsland(private val context: Context) {
                 "$title${if (artist.isEmpty()) "" else " · $artist"}"
             }
             subView?.text = sub
-            // 整体半透明：透明度作用于根视图，歌词与背景一并可调。
-            overlayView?.alpha = opacity.coerceIn(0f, 1f)
+            // 透明度仅作用于卡片背景 drawable：背景可调透明，歌词文字保持
+            // 不透明（根视图 alpha 始终为 1），保证文字清晰可读。
+            cardBackground?.alpha = (opacity.coerceIn(0f, 1f) * 255f).toInt()
             applyLocked(locked)
         } catch (e: Exception) {
             android.util.Log.w(TAG, "浮窗刷新失败", e)
@@ -161,6 +164,7 @@ class OverlayFloatingIsland(private val context: Context) {
         subView = null
         closeView = null
         lockIndicator = null
+        cardBackground = null
         wmParams = null
         locked = false
         dragging = false
@@ -184,18 +188,21 @@ class OverlayFloatingIsland(private val context: Context) {
         val textColor = 0xFFFFFFFF.toInt()
         val secondaryColor = 0xFFB6BAC1.toInt()
 
+        // 卡片背景：透明度仅作用于此 drawable，歌词文字保持不透明清晰。
+        val cardBg = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(cardColorTop, cardColorBottom)
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radius
+            setStroke((0.8f * density).toInt(), borderColor)
+        }
+        cardBackground = cardBg
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(16.dp(density), 12.dp(density), 12.dp(density), 12.dp(density))
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                intArrayOf(cardColorTop, cardColorBottom)
-            ).apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = radius
-                setStroke((0.8f * density).toInt(), borderColor)
-            }
+            background = cardBg
             elevation = 12.dp(density).toFloat()
             setOnTouchListener(touchListener)
         }
