@@ -115,6 +115,27 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   String? _coverDirPath;
   String? _lastCoverId;
   Uri? _cachedCoverUri;
+
+  /// 当前曲目封面本地文件路径。当前曲目的 Metadata 用 `file://` 指向它
+  /// （对齐 NagoMusic 实机验证方案），audio_service 按 artCacheFile 让原生
+  /// 侧内嵌 ALBUM_ART Bitmap；妙播媒体卡片读内嵌 Bitmap 显示封面。
+  String? _cachedCoverPath;
+
+  /// 切歌时是否正在解析当前歌曲封面。解析期间抑制 [_syncMediaItem]，
+  /// 避免把「无 Bitmap」的 Metadata 先发布给系统（HyperOS 妙播卡片一旦
+  /// 以无封面状态渲染，后续 artUri 更新不会刷新）。
+  bool _coverResolving = false;
+
+  /// 切歌时等待封面解析的最大时长。缓存命中是瞬时操作；超时后回退远程
+  /// URL 兜底，避免封面下载拖慢媒体卡片的标题/歌手显示。
+  static const Duration _coverResolveTimeout = Duration(seconds: 2);
+
+  /// 媒体会话封面下载尺寸。120px 会被小米图像管线判为「small resolution」
+  /// （日志：JpegXmCodec::isSupported returns false for small resolution），
+  /// 妙播媒体卡片不渲染。用 512px 内嵌 Bitmap（客户端按需缩放）并作为
+  /// ALBUM_ART_URI 指向的较大版本。
+  static const int _systemCoverSize = 512;
+
   final Map<String, _CarBrowseSong> _browseSongs = <String, _CarBrowseSong>{};
   Future<void>? _apiAuthReady;
 
@@ -192,7 +213,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
   Future<Uri?> _getLocalCoverUri(String coverId, {int? updatedAt}) async {
     final url = FeiNiuApiClient.instance.coverUrl(
       coverId,
-      size: 120,
+      size: _systemCoverSize,
       updatedAt: updatedAt,
     );
     _debugLog('getLocalCoverUri coverId=$coverId url=$url');
@@ -276,64 +297,14 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     return null;
   }
 
-  // ---- 快速封面缓存查找（切歌时同步调用） ----
-
-  /// 多源封面缓存查找（切歌时同步调用，不发起网络请求）。
-  ///
-  /// 查找顺序：
-  /// 1. CoverLocalCache 的 sha1 命名文件（之前播放/下载过则必命中，与尺寸无关）
-  /// 2. flutter_cache_manager 磁盘缓存（CachedNetworkImage 共用池，查多个常用尺寸）
-  ///
-  /// UI 已通过 CachedNetworkImage 展示过该歌曲封面，或用户之前听过这首歌，
-  /// 则命中率极高。拿到本地 file:// URI 后发布首个 MediaItem，确保封面从一开始就正确。
-  Future<Uri?> _quickCacheLookup(String coverId, {int? updatedAt}) async {
-    // 1. CoverLocalCache sha1 文件（与尺寸无关，只要之前下载过就存在）
-    try {
-      final cacheKey = '$coverId:${updatedAt ?? 0}';
-      final fileName =
-          '${crypto.sha1.convert(utf8.encode(cacheKey))}.img';
-      final dir = await getTemporaryDirectory();
-      final imgFile = io.File('${dir.path}/covers_v2/$fileName');
-      if (await imgFile.exists()) {
-        _debugLog('quickCacheLookup hit CoverLocalCache path=${imgFile.path}');
-        return Uri.file(imgFile.path);
-      }
-    } catch (e) {
-      _debugLog('quickCacheLookup CoverLocalCache check failed: $e');
-    }
-
-    // 2. flutter_cache_manager（UI 用 CachedNetworkImage 展示时已下载）
-    //    查多个常用尺寸以最大化命中（UI 可能用 52/120/300/512 等）
-    for (final size in [52, 120, 300]) {
-      try {
-        final url = FeiNiuApiClient.instance.coverUrl(
-          coverId,
-          size: size,
-          updatedAt: updatedAt,
-        );
-        final cacheObject = await _coverCache.getFileFromCache(url);
-        if (cacheObject != null) {
-          final cachedPath = cacheObject.file.path;
-          final cachedFile = io.File(cachedPath);
-          if (await cachedFile.exists()) {
-            _debugLog(
-              'quickCacheLookup hit fcm size=$size path=$cachedPath',
-            );
-            return Uri.file(cachedPath);
-          }
-        }
-      } catch (e) {
-        // 继续尝试下一个尺寸
-      }
-    }
-
-    _debugLog('quickCacheLookup miss coverId=$coverId');
-    return null;
-  }
-
   // ---- MediaItem / PlaybackState 构建 ----
 
-  MediaItem _itemFromSong(SongEntity song) {
+  /// [current] 为 true 表示构建「当前播放曲目」的 MediaItem：artUri 用
+  /// file:// 本地路径（对齐 NagoMusic 实机验证的方案），audio_service 按
+  /// artCacheFile 让原生侧内嵌 ALBUM_ART Bitmap，妙播媒体卡片直接读内嵌
+  /// Bitmap。队列/浏览条目（[current] 为 false）仍用 content://，供
+  /// Android Auto 等外部进程读取。
+  MediaItem _itemFromSong(SongEntity song, {bool current = false}) {
     final lyricLine = MediaNotificationSettings.showLyrics.value
         ? _currentLyricLine
         : null;
@@ -344,13 +315,25 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
         : '$titleText · $artistText';
     final albumName = song.albumDisplayName;
 
-    // artUri: 仅使用本地文件 URI（file:// 或 content://）。
-    // Android 系统通知栏加载 artUri 时不会携带认证头，远程 API URL 必然 401/403；
-    // 发了远程 URL 系统会"记住"加载失败状态，后续即使替换为本地 URI 也可能不刷新。
-    // 因此本地封面未就绪时传 null（显示默认图标），等 _syncAndUpdateCover 拿到本地路径后再更新。
+    // artUri: 当前曲目优先 file:// 本地路径；队列/浏览用 content://。
     Uri? artUri;
-    if (song.coverId != null && song.coverId!.isNotEmpty && _cachedCoverUri != null) {
-      artUri = _cachedCoverUri;
+    if (song.coverId != null && song.coverId!.isNotEmpty) {
+      if (current &&
+          _cachedCoverPath != null &&
+          _cachedCoverPath!.isNotEmpty) {
+        artUri = Uri.file(_cachedCoverPath!);
+      } else if (_cachedCoverUri != null) {
+        artUri = _cachedCoverUri;
+      } else {
+        // 本地封面尚未就绪时发远程 URL，audio_service 会自动下载并缓存
+        artUri = Uri.tryParse(
+          FeiNiuApiClient.instance.coverUrl(
+            song.coverId!,
+            size: _systemCoverSize,
+            updatedAt: song.updatedAt,
+          ),
+        );
+      }
     }
 
     final lyricOnTop = MediaNotificationSettings.lyricOnTop.value;
@@ -952,258 +935,19 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
       _debugLog('song changed to ${snap.song?.title ?? 'none'}');
     }
 
-    // 切歌时优先从缓存获取封面（CachedNetworkImage 已在 UI 展示时下载过，
-    // 磁盘缓存命中率极高），拿到本地 URI 后再发布 MediaItem。
-    // 避免先发无封面通知再异步刷新——HyperOS/Xiaomi 媒体控件对后续 artwork
-    // 更新支持不一致，很多情况下"记住"了首次发布的空封面状态。
     if (songChanged) {
       final song = snap.song;
       _cachedCoverUri = null;
       if (song != null && song.coverId != null && song.coverId!.isNotEmpty) {
         _lastCoverId = song.coverId;
-        // 同步查缓存（纯磁盘 I/O，不发起网络请求），UI 已展示过则必命中。
-        final cached = await _quickCacheLookup(song.coverId!, updatedAt: song.updatedAt);
-        if (cached != null) {
-          _cachedCoverUri = cached;
-          _debugLog('cover cache hit on song change, publishing with artUri');
-        }
-        _syncQueue(snap);
-        _syncMediaItem();
-        // 缓存未命中时后台下载，完成后刷新（兜底）。
-        if (_cachedCoverUri == null && io.Platform.isAndroid) {
-          unawaited(_syncAndUpdateCover(song));
-        }
-      } else {
-        _syncQueue(snap);
-        _syncMediaItem();
-      }
-    } else {
-      _syncQueue(snap);
-      _syncMediaItem();
-    }
-    _syncPlaybackState(snap);
-    if (songChanged) {
-      _refreshFavoriteState();
-    }
-  }
-
-  /// 封面缓存完成后刷新媒体项，使车机和系统媒体客户端读取 content:// URI。
-  Future<void> _syncAndUpdateCover(SongEntity song) async {
-    if (song.coverId == null || song.coverId!.isEmpty) return;
-    try {
-      _debugLog(
-        'syncAndUpdateCover song=${song.title} coverId=${song.coverId}',
-      );
-      final localPath = await CoverLocalCache.downloadToLocal(
-        song.coverId!,
-        updatedAt: song.updatedAt,
-      );
-      final contentUri = await CoverLocalCache.contentUriForPath(localPath);
-      final localUri =
-          contentUri ??
-          await _getLocalCoverUri(song.coverId!, updatedAt: song.updatedAt);
-      _debugLog('syncAndUpdateCover localUri=$localUri');
-      if (localUri != null && song.id == _lastSongId) {
-        _cachedCoverUri = localUri;
-      }
-      // 拿到本地封面（或返回 null）后再同步队列和当前曲目
-      _syncQueue(player.snapshot.value);
-      _syncMediaItem();
-    } catch (error) {
-      _debugLog('sync car cover failed: $error');
-    }
-  }
-
-  /// 将应用内播放队列发布给系统媒体会话。
-  void _syncQueue(PlaybackSnapshot snap) {
-    final sessionQueue = _queueForMediaSession(snap);
-    final queueKey = sessionQueue.map((song) => song.id).join('|');
-    if (queueKey == _lastQueueKey) return;
-    _lastQueueKey = queueKey;
-    _publishedQueueIds = sessionQueue.map((song) => song.id).toList();
-    queue.add(sessionQueue.map(_itemFromSong).toList());
-  }
-
-  List<SongEntity> _queueForMediaSession(PlaybackSnapshot snap) {
-    if (!player.roamActive || snap.queue.isEmpty) {
-      _roamQueueAnchorId = null;
-      _stableRoamQueue = null;
-      return snap.queue;
-    }
-    final anchorId = snap.queue.first.id;
-    if (_roamQueueAnchorId != anchorId || _stableRoamQueue == null) {
-      _roamQueueAnchorId = anchorId;
-      _stableRoamQueue = List<SongEntity>.unmodifiable(snap.queue.take(2));
-    }
-    return _stableRoamQueue!;
-  }
-
-  void _syncMediaItem() {
-    final current = player.snapshot.value.song;
-    final item = current != null ? _itemFromSong(current) : null;
-    // itemKey 必须包含车载歌词行：当「通知显示歌词」关闭时，title/artist/
-    // displaySubtitle 不含歌词，连续歌词行会产生相同 itemKey 被去重吞掉，
-    // 导致车机收不到歌词更新。
-    final itemKey = item == null
-        ? 'none'
-        : [
-            item.id,
-            item.title,
-            item.artist ?? '',
-            item.displayTitle ?? '',
-            item.displaySubtitle ?? '',
-            item.artUri?.toString() ?? '',
-            item.extras?['android.media.metadata.LYRICS'] ?? '',
-          ].join('|');
-    if (itemKey == _lastMediaItemKey) return;
-    _lastMediaItemKey = itemKey;
-    mediaItem.add(item);
-  }
-
-  void _syncPlaybackState(PlaybackSnapshot snap) {
-    final next = _stateFromSnap(snap);
-    final stateKey = [
-      snap.song?.id ?? '',
-      snap.index,
-      snap.isPlaying,
-      next.processingState.name,
-      snap.position.inMilliseconds,
-      snap.bufferedPosition.inMilliseconds,
-      snap.duration?.inMilliseconds ?? -1,
-      player.speed.value,
-      _isFavorite,
-      MediaNotificationSettings.showLyrics.value,
-      MediaNotificationSettings.lyricOnTop.value,
-      MediaNotificationSettings.showCloseAction.value,
-      MediaNotificationSettings.showFavoriteAction.value,
-      _supportsCustomActions,
-    ].join('|');
-    if (stateKey == _lastPlaybackStateKey) return;
-    _lastPlaybackStateKey = stateKey;
-    playbackState.add(next);
-  }
-
-  void _onLyricLineChanged() {
-    _currentLyricLine = LyricsService.instance.currentLineText.value;
-    _syncMediaItem();
-  }
-
-  void _onNotificationSettingsChanged() {
-    if (!MediaNotificationSettings.showLyrics.value) {
-      _currentLyricLine = null;
-    } else {
-      _currentLyricLine = LyricsService.instance.currentLineText.value;
-    }
-    _syncMediaItem();
-    playbackState.add(_stateFromSnap(player.snapshot.value));
-  }
-
-  void _refreshFavoriteState() {
-    final song = player.snapshot.value.song;
-    if (song == null) return;
-    // 从服务器查询收藏状态
-    FeiNiuFavoriteService.instance.isFavorite(song.id).then((fav) {
-      _updateFavorite(fav);
-    });
-  }
-
-  void _updateFavorite(bool value) {
-    if (_isFavorite == value) return;
-    _isFavorite = value;
-    _debugLog('favorite state changed: $_isFavorite');
-    playbackState.add(_stateFromSnap(player.snapshot.value));
-  }
-
-  // ---- 通知按钮回调 ----
-
-  @override
-  Future<void> skipToNext() {
-    _debugLog('skipToNext action');
-    return player.next();
-  }
-
-  @override
-  Future<void> skipToPrevious() {
-    _debugLog('skipToPrevious action');
-    return player.previous();
-  }
-
-  @override
-  Future<void> seek(Duration position) {
-    _debugLog('seek action ${position.inMilliseconds}ms');
-    return player.seek(position);
-  }
-
-  @override
-  Future<void> skipToQueueItem(int index) {
-    _debugLog('skipToQueueItem action index=$index');
-    // Android Auto / 系统媒体中心的队列列表点选曲目时调用，
-    // 必须真正跳到对应索引（原实现恒为 next()，点队列无效）。
-    return player.skipToIndex(index);
-  }
-
-  @override
-  Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
-    _debugLog('customAction name=$name');
-    if (name == _actionCloseApp) {
-      _debugLog('close action');
-      await stop();
-      return;
-    }
-    if (name == _actionFavorite) {
-      final song = player.snapshot.value.song;
-      if (song == null) return;
-      if (_isFavorite) {
-        _debugLog('favorite remove action song=${song.title}');
-        try {
-          await FeiNiuFavoriteService.instance.unfavorite(song.id);
-          _updateFavorite(false);
-        } catch (e) {
-          _debugLog('unfavorite failed: $e');
-        }
-      } else {
-        _debugLog('favorite add action song=${song.title}');
-        try {
-          await FeiNiuFavoriteService.instance.favorite(song.id);
-          _updateFavorite(true);
-        } catch (e) {
-          _debugLog('favorite failed: $e');
-        }
-      }
-      return;
-    }
-    return super.customAction(name, extras);
-  }
-
-  @override
-  Future<void> play() {
-    _debugLog('play action');
-    return player.play();
-  }
-
-  @override
-  Future<void> pause() {
-    _debugLog('pause action');
-    return player.pause();
-  }
-
-  @override
-  Future<void> stop() {
-    _debugLog('stop action');
-    return player.stopAndClear();
-  }
-}
-
-class _CarBrowseSong {
-  const _CarBrowseSong({
-    required this.parentMediaId,
-    required this.mediaItem,
-    required this.queue,
-    required this.index,
-  });
-
-  final String parentMediaId;
-  final MediaItem mediaItem;
-  final List<SongEntity> queue;
-  final int index;
-}
+        if (io.Platform.isAndroid) {
+          // HyperOS 媒体卡片只在首次渲染 Metadata 时读取 ALBUM_ART（Bitmap），
+          // 之后仅更新 artUri（哪怕换成 content://）也不会刷新封面图。
+          // 因此这里等本地封面解析完成（content:// / file://，audio_service
+          // 原生侧会把它转成 Bitmap 嵌入 Metadata）再发布队列 + 当前曲目，
+          // 避免任何「无 Bitmap」的 Metadata 先进入系统被妙播固定成无封面。
+          // 解析期间 _syncMediaItem 由 _coverResolving 抑制。
+          _publishWithLocalArt(song);
+        } else {
+          _syncQueue(snap);
+          _syncMediaItem();

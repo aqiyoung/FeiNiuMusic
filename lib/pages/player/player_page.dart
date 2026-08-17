@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_lyric/core/lyric_model.dart';
@@ -345,7 +346,10 @@ class _PlayerView extends StatelessWidget {
                 mq.size.width >= 900;
             if (!isTabletLandscape) {
               if (stylePreset == PlayerStylePreset.poster) {
-                return _PosterPlayerLayout(player: player);
+                return _PosterPlayerLayout(
+                  player: player,
+                  onTapLyrics: onTapLyrics,
+                );
               }
               return _MobilePlayerLayout(
                 player: player,
@@ -478,10 +482,20 @@ class _TabletLandscapePlayerLayout extends StatelessWidget {
   }
 }
 
+/// 海报模式 Slider 轨道两端的内缩量。`BaseSliderTrackShape.getPreferredRect` 按
+/// `max(overlayWidth, thumbWidth) / 2` 收进两端：这里 overlay 半径为 0、
+/// thumb 半径 6，因此每端内缩 6px，轨道并不会占满全宽。轨道、加载条、
+/// 时间标签与下方按钮行都对齐同一个内缩量，保证水平几何一致。
+const double _posterTrackInset = 6;
+
 class _PosterPlayerLayout extends StatelessWidget {
   final PlayerService player;
+  final VoidCallback onTapLyrics;
 
-  const _PosterPlayerLayout({required this.player});
+  const _PosterPlayerLayout({
+    required this.player,
+    required this.onTapLyrics,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -557,20 +571,40 @@ class _PosterPlayerLayout extends StatelessWidget {
                     ),
                     // 歌词预览：弹性占满「标题之下、控制区之上」的剩余空间，
                     // 空间不足时收缩（含收缩到 0），底栏永不溢出。
+                    // 点击预览区跳转到右侧歌词页（与底栏迷你歌词行为一致）。
                     const SizedBox(height: 12),
                     Expanded(
                       child: Skeletonizer(
                         enabled: song == null,
-                        child: _PosterLyricsPreview(),
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: onTapLyrics,
+                          child: _PosterLyricsPreview(),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    // 收藏 / 队列按钮（与 1.4.1 一致，位于进度条上方）
-                    _PosterMetaRow(player: player, song: song),
+                    // 收藏 / 队列按钮（与 1.4.1 一致，位于进度条上方）。
+                    // 两端与轨道内缩（_posterTrackInset）对齐，不超出轨道。
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: _posterTrackInset,
+                      ),
+                      child: _PosterMetaRow(player: player, song: song),
+                    ),
                     const SizedBox(height: 2),
                     _PosterSeekBar(player: player),
                     const SizedBox(height: 20),
-                    PosterControls(player: player),
+                    // 播放控制：行宽与轨道对齐（两端内缩 _posterTrackInset）。
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: _posterTrackInset,
+                      ),
+                      child: PosterControls(
+                        player: player,
+                        alignToTrack: true,
+                      ),
+                    ),
                     // 底部留白：让控制栏整体抬离屏幕底部
                     SizedBox(height: bottomInset > 20 ? 16 : 28),
                   ],
@@ -601,81 +635,125 @@ class _PosterArtwork extends StatelessWidget {
   Widget build(BuildContext context) {
     return Watch.builder(
       builder: (context) {
-        final song = songSignal.value;
+        final topPad = MediaQuery.paddingOf(context).top;
+        // 遮罩深浅跟随状态栏图标亮度（app.dart 按主题设置图标颜色）。
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        // 顶部模糊渐变区高度：状态栏 + 一段封面。模糊底只画到这一带，避免
+        // 延伸到封面底部——否则清晰封面底部渐隐时会透出模糊带，看起来像一条
+        // 分割线（其实就是封面被截断/透底）。
+        final frostHeight = (topPad + 64.0).clamp(0.0, heroHeight).toDouble();
         return SizedBox(
           height: heroHeight,
           width: double.infinity,
-          // Fade the cover's bottom to transparent so it dissolves into the
-          // cover-color + 流光 background below (instead of a hard edge / white).
-          child: ShaderMask(
-            blendMode: BlendMode.dstIn,
-            shaderCallback: (rect) => const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.white, Colors.white, Colors.transparent],
-              stops: [0.0, 0.72, 1.0],
-            ).createShader(rect),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    // 防御：尺寸钳制为正的有限值，避免横竖屏切换/首帧瞬态时
-                    // boxSize 为 0 或 NaN，连锁导致 ShaderMask/RotationTransition
-                    // 产生 Matrix4 非有限值 / RRect NaN 崩溃。
-                    final maxW = constraints.maxWidth.isFinite
-                        ? constraints.maxWidth
-                        : 0.0;
-                    final maxH = constraints.maxHeight.isFinite
-                        ? constraints.maxHeight
-                        : 0.0;
-                    final boxSize = (maxW > maxH ? maxW : maxH).clamp(1.0, 2000.0);
-                    final child = song == null
-                        ? Skeletonizer(
-                            enabled: true,
-                            child: _ArtworkPlaceholder(
-                              border: BorderRadius.zero,
-                              label: '',
-                            ),
-                          )
-                        : ArtworkWidget(
-                            song: song,
-                            size: boxSize,
-                            // 海报模式为大封面全屏布局：无论「圆形封面」开关如何
-                            // 均整幅方形铺满、不旋转（旋转仅对圆形封面有意义）。
-                            borderRadius: 0,
-                            preferOriginal: true,
-                            keepPreviousUntilLoaded: true,
-                            placeholder: Skeletonizer(
-                              enabled: true,
-                              child: _ArtworkPlaceholder(
-                                border: BorderRadius.zero,
-                                label: song.title,
-                              ),
-                            ),
-                          );
-                    return ClipRect(
-                      child: OverflowBox(
-                        maxWidth: boxSize,
-                        maxHeight: boxSize,
-                        child: child,
-                      ),
-                    );
-                  },
-                ),
-                // Subtle top scrim so status-bar icons stay legible over art.
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x1A000000), Colors.transparent],
-                      stops: [0.0, 0.22],
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // 模糊底：仅覆盖顶部渐变区（与清晰封面顶部透明区同高对齐），
+              // 不让封面底部渐隐时透出模糊带。
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: frostHeight,
+                child: ClipRect(
+                  child: ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(
+                      sigmaX: 18,
+                      sigmaY: 18,
                     ),
+                    child: _buildCover(context),
                   ),
                 ),
-              ],
-            ),
+              ),
+              // 清晰封面：顶部透明（露出磨砂渐变）→ 中间不透明 → 底部渐隐并
+              // 保持完全透明。用单层 ShaderMask 同时做顶部与底部两个渐变，
+              // 减少嵌套遮罩，避免多级合成在底部留下残边（即标题上方的
+              // 「分割线」）；底部 0.95 起完全透明，截断硬边落在透明区内。
+              ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) => LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: const [
+                    Color(0x00FFFFFF),
+                    Colors.white,
+                    Colors.white,
+                    Color(0x00FFFFFF),
+                    Color(0x00FFFFFF),
+                  ],
+                  stops: [
+                    0.0,
+                    frostHeight / heroHeight,
+                    0.62,
+                    0.95,
+                    1.0,
+                  ],
+                ).createShader(rect),
+                child: _buildCover(context),
+              ),
+              // 状态栏可读性遮罩：顶部渐暗/渐亮（随主题），确保状态栏图标可读。
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      isDark
+                          ? const Color(0x40000000)
+                          : const Color(0x40FFFFFF),
+                      Colors.transparent,
+                    ],
+                    stops: const [0.0, 0.45],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 封面主图（海报模式整幅方形铺满、不旋转）。
+  Widget _buildCover(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final song = songSignal.value;
+        // 防御：尺寸钳制为正的有限值，避免横竖屏切换/首帧瞬态时
+        // boxSize 为 0 或 NaN，连锁导致 ShaderMask/RotationTransition
+        // 产生 Matrix4 非有限值 / RRect NaN 崩溃。
+        final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : 0.0;
+        final maxH = constraints.maxHeight.isFinite ? constraints.maxHeight : 0.0;
+        final boxSize = (maxW > maxH ? maxW : maxH).clamp(1.0, 2000.0);
+        final child = song == null
+            ? Skeletonizer(
+                enabled: true,
+                child: _ArtworkPlaceholder(
+                  border: BorderRadius.zero,
+                  label: '',
+                ),
+              )
+            : ArtworkWidget(
+                song: song,
+                size: boxSize,
+                // 海报模式为大封面全屏布局：无论「圆形封面」开关如何
+                // 均整幅方形铺满、不旋转（旋转仅对圆形封面有意义）。
+                borderRadius: 0,
+                preferOriginal: true,
+                keepPreviousUntilLoaded: true,
+                placeholder: Skeletonizer(
+                  enabled: true,
+                  child: _ArtworkPlaceholder(
+                    border: BorderRadius.zero,
+                    label: song.title,
+                  ),
+                ),
+              );
+        return ClipRect(
+          child: OverflowBox(
+            maxWidth: boxSize,
+            maxHeight: boxSize,
+            child: child,
           ),
         );
       },
@@ -909,6 +987,8 @@ class _PosterSeekBar extends StatefulWidget {
 }
 
 class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
+  // 轨道两端内缩量见文件级 [_posterTrackInset]，加载条/时间标签/按钮行共用。
+
   late final _dragValue = createSignal<double?>(null);
 
   String _format(Duration? duration) {
@@ -936,9 +1016,10 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
         return Column(
           children: [
             // 进度条
-            // Slider 轨道两端默认按 overlayRadius 内缩。这里把 overlayRadius 设为 0，
-            // 轨道占满全宽，两端恰好与上方收藏/队列图标外缘对齐。
-            // （不用负 padding / OverflowBox 扩展，避免布局异常。）
+            // Slider 轨道两端默认按 max(overlayWidth, thumbWidth)/2 内缩：
+            // overlay 半径 0、thumb 半径 6 → 每端内缩 6px，并不能真正占满
+            // 全宽。因此下方加载条两端也用相同的 _posterTrackInset，两条轨道几何
+            // 完全一致、重叠对齐，避免加载条在左端多出一截灰色。
             SizedBox(
               height: 24,
               child: Stack(
@@ -946,7 +1027,12 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                 children: [
                   Positioned.fill(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      // 水平方向与 Slider 轨道内缩一致（_posterTrackInset=6），两端
+                      // 对齐，保证加载条与进度条完全重叠。
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: _posterTrackInset,
+                        vertical: 10,
+                      ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(2),
                         child: LinearProgressIndicator(
@@ -966,7 +1052,7 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                       trackHeight: 3,
                       trackShape: const RoundedRectSliderTrackShape(),
                       thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 6,
+                        enabledThumbRadius: _posterTrackInset,
                       ),
                       overlayShape: const RoundSliderOverlayShape(
                         overlayRadius: 0,
@@ -999,9 +1085,10 @@ class _PosterSeekBarState extends State<_PosterSeekBar> with SignalsMixin {
                 ],
               ),
             ),
-            // 时间标签：位于进度条下方，两端对齐
+            // 时间标签：位于进度条下方，两端与轨道内缩（_posterTrackInset）对齐，
+            // 不超出进度条两端的实际长度。
             Padding(
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(horizontal: _posterTrackInset),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
