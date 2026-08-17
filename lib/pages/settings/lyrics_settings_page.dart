@@ -254,19 +254,59 @@ class _LyricsSettingsPageState extends State<LyricsSettingsPage>
     final liveAvailable = caps.liveEnabled;
     final focusAvailable = caps.focusEnabled;
 
-    // 浮窗灵动岛（官方 LOGO）：应用内悬浮窗自行绘制官方图标 + 歌词，
+    // 桌面歌词：应用内悬浮窗在屏幕底部常驻显示大号歌词，可拖动位置、双击锁定，
     // 完全绕开系统通知链路（live 紫底圆 / 焦点需白名单），不依赖实时/焦点
-    // 系统能力，稳定显示全彩官方 LOGO。该开关始终可选。
+    // 系统能力，稳定显示歌词。该开关始终可选。
     final List<Widget> tiles = [
       ValueListenableBuilder<bool>(
         valueListenable: IslandLyricSettings.floatingIsland,
         builder: (context, floating, _) {
-          return AppSettingSwitchTile(
-            title: '浮窗灵动岛（官方LOGO）',
-            subtitle: '用应用内悬浮窗自行绘制官方图标 + 歌词，绕开系统通知，'
-                '稳定显示全彩官方 LOGO（需授予「悬浮窗」权限，免 Shizuku）',
-            value: floating,
-            onChanged: _setFloatingIsland,
+          return Column(
+            children: [
+              AppSettingSwitchTile(
+                title: '桌面歌词',
+                subtitle: '用应用内悬浮窗在屏幕底部常驻显示大号歌词（可拖动位置、'
+                    '双击锁定），绕开系统通知，免 Shizuku / 白名单'
+                    '（需授予「悬浮窗」权限）',
+                value: floating,
+                onChanged: _setFloatingIsland,
+              ),
+              if (floating)
+                ValueListenableBuilder<double>(
+                  valueListenable: IslandLyricSettings.floatingIslandOpacity,
+                  builder: (context, opacity, _) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '歌词透明度：${(opacity * 100).round()}%',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                          Slider(
+                            value: opacity,
+                            min: 0.1,
+                            max: 1.0,
+                            divisions: 18,
+                            label: '${(opacity * 100).round()}%',
+                            onChanged: (v) {
+                              IslandLyricSettings.setFloatingIslandOpacity(v);
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
           );
         },
       ),

@@ -19,6 +19,8 @@ class IslandLyricSettings {
   static const String _prefsBypassFocusLimit = 'island_lyric_bypass_focus_limit';
   static const String _prefsMigratedFocusV2 = 'island_lyric_migrated_focus_v2';
   static const String _prefsFloatingIsland = 'island_lyric_floating_island';
+  static const String _prefsFloatingIslandOpacity =
+      'island_lyric_floating_island_opacity';
 
   static final ValueNotifier<bool> enabled = ValueNotifier(false);
   static final ValueNotifier<bool> showProgress = ValueNotifier(true);
@@ -45,6 +47,10 @@ class IslandLyricSettings {
   /// 图标 + 歌词，完全绕开系统通知链路（live 紫底圆 / 焦点需白名单的坑），
   /// 稳定显示全彩官方 LOGO。需 SYSTEM_ALERT_WINDOW（悬浮窗）权限。默认关闭。
   static final ValueNotifier<bool> floatingIsland = ValueNotifier(false);
+
+  /// 浮窗桌面歌词透明度：0.0 完全透明 ~ 1.0 完全不透明。默认 0.75。
+  static final ValueNotifier<double> floatingIslandOpacity =
+      ValueNotifier(0.75);
 
   static Future<void>? _loading;
 
@@ -73,6 +79,8 @@ class IslandLyricSettings {
     notificationType.value = loadedType;
     bypassFocusLimit.value = prefs.getBool(_prefsBypassFocusLimit) ?? false;
     floatingIsland.value = prefs.getBool(_prefsFloatingIsland) ?? false;
+    floatingIslandOpacity.value =
+        (prefs.getDouble(_prefsFloatingIslandOpacity) ?? 0.75).clamp(0.0, 1.0);
   }
 
   static Future<void> setEnabled(bool value) async {
@@ -120,6 +128,14 @@ class IslandLyricSettings {
     floatingIsland.value = value;
   }
 
+  /// 设置浮窗桌面歌词透明度（0.0 ~ 1.0）。
+  static Future<void> setFloatingIslandOpacity(double value) async {
+    final clamped = value.clamp(0.0, 1.0);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_prefsFloatingIslandOpacity, clamped);
+    floatingIslandOpacity.value = clamped;
+  }
+
   /// 测试专用：重置内存状态（清空懒加载缓存），供测试 setUp 复用。
   static void resetForTest() {
     _loading = null;
@@ -130,5 +146,6 @@ class IslandLyricSettings {
     notificationType.value = typeLive;
     bypassFocusLimit.value = false;
     floatingIsland.value = false;
+    floatingIslandOpacity.value = 0.75;
   }
 }

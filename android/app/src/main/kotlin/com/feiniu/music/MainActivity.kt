@@ -343,7 +343,10 @@ class MainActivity : AudioServiceActivity() {
                     val lyric = call.argument<String>("lyric") ?: ""
                     val coverPath = call.argument<String>("coverPath")
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: true
-                    overlayFloatingIsland.show(title, artist, lyric, coverPath, isPlaying)
+                    val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0.75f
+                    overlayFloatingIsland.show(
+                        title, artist, lyric, coverPath, isPlaying, opacity
+                    )
                     result.success(null)
                 }
                 "update" -> {
@@ -351,7 +354,10 @@ class MainActivity : AudioServiceActivity() {
                     val artist = call.argument<String>("artist") ?: ""
                     val lyric = call.argument<String>("lyric") ?: ""
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: true
-                    overlayFloatingIsland.update(title, artist, lyric, isPlaying)
+                    val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0.75f
+                    overlayFloatingIsland.update(
+                        title, artist, lyric, isPlaying, opacity
+                    )
                     result.success(null)
                 }
                 "hide" -> {

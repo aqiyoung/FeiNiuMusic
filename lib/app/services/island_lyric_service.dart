@@ -13,7 +13,8 @@ import '../services/player_service.dart';
 ///
 /// 监听 [LyricsService.currentLineText] 与 [PlayerService]，在「开关打开、正在
 /// 播放、当前行有歌词」时，通过 MethodChannel 驱动原生层发送 HyperOS/MIUI
-/// 「焦点通知」，让歌词渲染在系统灵动岛。暂停/停止/无歌词时隐藏。
+/// 「焦点通知」，让歌词渲染在系统灵动岛；或驱动「桌面歌词」悬浮窗（屏幕底部
+/// 大号歌词 + 透明度）。暂停/停止/无歌词时隐藏。
 ///
 /// 更新策略：
 /// - 歌词行变化 → 立即发送（[shouldUpdate] 去重相同行）；
@@ -33,7 +34,7 @@ class IslandLyricService {
     'com.feiniu.music/island_lyric_shizuku',
   );
 
-  /// 浮窗灵动岛通道：常驻显示官方 LOGO + 歌词，完全绕开系统通知链路。
+  /// 桌面歌词浮窗通道：屏幕底部大号歌词 + 透明度，完全绕开系统通知链路。
   static const MethodChannel _floatingChannel = MethodChannel(
     'com.feiniu.music/floating_island',
   );
@@ -161,6 +162,9 @@ class IslandLyricService {
   /// 上次发送用的绕过状态。切换绕过开关时即使歌词未变也要重发（让绕过即时生效）。
   static bool _lastBypassFocusLimit = false;
 
+  /// 上次发送用的浮窗桌面歌词透明度。切换透明度时即使歌词未变也要重发。
+  static double _lastFloatingIslandOpacity = 0.75;
+
   // 封面相关状态
   static String? _lastSongId;
   static String? _lastCoverId;
@@ -176,6 +180,7 @@ class IslandLyricService {
     IslandLyricSettings.notificationType.addListener(_onSettingsChanged);
     IslandLyricSettings.bypassFocusLimit.addListener(_onSettingsChanged);
     IslandLyricSettings.floatingIsland.addListener(_onSettingsChanged);
+    IslandLyricSettings.floatingIslandOpacity.addListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.addListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.addListener(_onPlayingChanged);
     PlayerService.instance.position.addListener(_onPositionChanged);
@@ -193,6 +198,7 @@ class IslandLyricService {
     IslandLyricSettings.notificationType.removeListener(_onSettingsChanged);
     IslandLyricSettings.bypassFocusLimit.removeListener(_onSettingsChanged);
     IslandLyricSettings.floatingIsland.removeListener(_onSettingsChanged);
+    IslandLyricSettings.floatingIslandOpacity.removeListener(_onSettingsChanged);
     LyricsService.instance.currentLineText.removeListener(_onLyricLineChanged);
     PlayerService.instance.isPlaying.removeListener(_onPlayingChanged);
     PlayerService.instance.position.removeListener(_onPositionChanged);
@@ -204,6 +210,7 @@ class IslandLyricService {
     _lastFrameIndex = 0;
     _lastNotificationType = IslandLyricSettings.typeLive;
     _lastBypassFocusLimit = false;
+    _lastFloatingIslandOpacity = 0.75;
     _lastSongId = null;
     _lastCoverId = null;
     _lastCoverPath = null;
@@ -623,6 +630,13 @@ class IslandLyricService {
     if (_lastBypassFocusLimit != IslandLyricSettings.bypassFocusLimit.value) {
       _lastBypassFocusLimit = IslandLyricSettings.bypassFocusLimit.value;
       _sendUpdate();
+      return;
+    }
+
+    // 歌词与类型/绕过未变但桌面歌词透明度切换：浮窗重新发送以即时应用新透明度。
+    if (_lastFloatingIslandOpacity != IslandLyricSettings.floatingIslandOpacity.value) {
+      _lastFloatingIslandOpacity = IslandLyricSettings.floatingIslandOpacity.value;
+      _sendUpdate();
     }
   }
 
@@ -713,14 +727,15 @@ class IslandLyricService {
     if (IslandLyricSettings.enabled.value) {
       _channel.invokeMethod('update', payload);
     }
-    // 浮窗灵动岛：官方 LOGO + 歌词常驻浮窗，绕开系统通知链路。整行歌词交给
-    // 浮窗自行跑马灯，不拆帧。
+    // 桌面歌词浮窗：大号歌词 + 透明度常驻浮窗，绕开系统通知链路。整行歌词交给
+    // 浮窗自行跑马灯，不拆帧。opacity 控制浮窗整体半透明（0.0~1.0）。
     if (IslandLyricSettings.floatingIsland.value) {
       _floatingChannel.invokeMethod('update', {
         'title': song?.title ?? '',
         'artist': song?.artistDisplayName ?? '',
         'lyric': lyricLine ?? '',
         'isPlaying': player.isPlaying.value,
+        'opacity': IslandLyricSettings.floatingIslandOpacity.value,
       });
     }
   }
