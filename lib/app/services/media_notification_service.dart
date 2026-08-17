@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:convert' show utf8;
 import 'dart:io' as io;
 
 import 'package:audio_service/audio_service.dart';
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
@@ -924,7 +922,7 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
     });
   }
 
-  Future<void> _syncFromPlayer() async {
+  void _syncFromPlayer() {
     final snap = player.snapshot.value;
     _requestNotificationPermissionIfNeeded(snap);
     final songId = snap.song?.id;
@@ -951,3 +949,333 @@ class _FeiNiuAudioHandler extends BaseAudioHandler
         } else {
           _syncQueue(snap);
           _syncMediaItem();
+        }
+      } else {
+        _syncQueue(snap);
+        _syncMediaItem();
+      }
+    } else {
+      _syncQueue(snap);
+      _syncMediaItem();
+    }
+    _syncPlaybackState(snap);
+    if (songChanged) {
+      _refreshFavoriteState();
+      _prewarmQueueCovers(snap);
+    }
+  }
+
+  /// 后台预下载队列接下来几首歌的封面（按 [_systemCoverSize]）。封面首请求
+  /// 会触发服务端生成、可能 >2s；切歌时 `_resolveLocalArtUri` 只有 2s 超时。
+  /// 预下载后切到这些歌时封面已在本地缓存，解析瞬时完成，妙播/通知拿到内嵌
+  /// Bitmap 的 Metadata，而不是回退远程 URL。
+  void _prewarmQueueCovers(PlaybackSnapshot snap) {
+    final queue = snap.queue;
+    if (queue.length < 2) return;
+    final next = queue.skip(1).take(3);
+    for (final song in next) {
+      final coverId = song.coverId;
+      if (coverId == null || coverId.isEmpty) continue;
+      unawaited(
+        CoverLocalCache.downloadToLocal(
+          coverId,
+          updatedAt: song.updatedAt,
+          size: _systemCoverSize,
+        ),
+      );
+    }
+  }
+
+  /// 封面就绪后再发布队列 + MediaItem，保证首次进入系统的 Metadata 内含
+  /// ALBUM_ART Bitmap（HyperOS 需要）。最多等 [_coverResolveTimeout]，
+  /// 超时/失败回退远程 URL（Android Auto 仍有 audio_service 自带下载兜底），
+  /// 并后台继续解析、完成后重发本地封面。
+  Future<void> _publishWithLocalArt(SongEntity song) async {
+    _coverResolving = true;
+    ({String? path, Uri? contentUri})? resolved;
+    try {
+      resolved = await _resolveLocalCover(song).timeout(_coverResolveTimeout);
+    } catch (_) {
+      _debugLog('resolve cover timeout, fallback to remote artUri');
+    } finally {
+      _coverResolving = false;
+    }
+    if (song.id != _lastSongId) return; // 已切歌，丢弃过期结果
+    final localPath = resolved?.path;
+    final hasLocal = localPath != null && localPath.isNotEmpty;
+    if (hasLocal) {
+      _cachedCoverPath = localPath;
+      _cachedCoverUri = resolved?.contentUri;
+    }
+    // 队列与当前曲目都改用本地封面（_syncQueue 的 artUri 去重键保证这次会
+    // 重新发布）：当前曲目 Metadata 用 file://（内嵌 Bitmap 供妙播），队列
+    // 条目用 content://（供 Android Auto 跨进程读取）。
+    _syncQueue(player.snapshot.value);
+    _syncMediaItem();
+    if (!hasLocal) {
+      // 本地封面未就绪：已按远程 URL 发布兜底，后台完成后重发本地封面。
+      unawaited(_syncAndUpdateCover(song));
+    }
+  }
+
+  /// 解析封面到本地：返回本地文件路径 + 给外部进程（Android Auto）的
+  /// content:// URI。路径用于当前曲目 Metadata 的 file:// artUri
+  /// （audio_service 按 artCacheFile 让原生侧内嵌 ALBUM_ART Bitmap，
+  /// 妙播媒体卡片读内嵌 Bitmap）。失败返回 (path: null, contentUri: null)。
+  Future<({String? path, Uri? contentUri})> _resolveLocalCover(
+    SongEntity song,
+  ) async {
+    final localPath = await CoverLocalCache.downloadToLocal(
+      song.coverId!,
+      updatedAt: song.updatedAt,
+      size: _systemCoverSize,
+    );
+    if (localPath != null && localPath.isNotEmpty) {
+      final contentUri = await CoverLocalCache.contentUriForPath(localPath);
+      return (path: localPath, contentUri: contentUri);
+    }
+    // 回退：老路径下载（file:// 或 null）。
+    final fallbackUri = await _getLocalCoverUri(
+      song.coverId!,
+      updatedAt: song.updatedAt,
+    );
+    if (fallbackUri != null && fallbackUri.scheme == 'file') {
+      return (path: fallbackUri.toFilePath(), contentUri: null);
+    }
+    return (path: null, contentUri: fallbackUri);
+  }
+
+  /// 封面缓存完成后刷新媒体项，使车机和系统媒体客户端读取本地封面。
+  Future<void> _syncAndUpdateCover(SongEntity song) async {
+    if (song.coverId == null || song.coverId!.isEmpty) return;
+    try {
+      _debugLog(
+        'syncAndUpdateCover song=${song.title} coverId=${song.coverId}',
+      );
+      final resolved = await _resolveLocalCover(song);
+      _debugLog(
+        'syncAndUpdateCover path=${resolved.path} contentUri=${resolved.contentUri}',
+      );
+      if (resolved.path != null && song.id == _lastSongId) {
+        _cachedCoverPath = resolved.path;
+        _cachedCoverUri = resolved.contentUri;
+      }
+      // 拿到本地封面（或返回 null）后再同步队列和当前曲目
+      _syncQueue(player.snapshot.value);
+      _syncMediaItem();
+    } catch (error) {
+      _debugLog('sync car cover failed: $error');
+    }
+  }
+
+  /// 将应用内播放队列发布给系统媒体会话。
+  void _syncQueue(PlaybackSnapshot snap) {
+    final sessionQueue = _queueForMediaSession(snap);
+    final items = sessionQueue.map(_itemFromSong).toList();
+    // 去重键包含 artUri：封面解析完成后（远程 URL → content://）必须重新
+    // 发布队列，否则外部客户端（Android Auto / 妙播）读到的队列条目仍是
+    // 无法加载的远程 URL，卡片不显示封面。
+    final queueKey = items
+        .map((i) => '${i.id}|${i.artUri?.toString() ?? ''}')
+        .join('|');
+    if (queueKey == _lastQueueKey) return;
+    _lastQueueKey = queueKey;
+    _publishedQueueIds = sessionQueue.map((song) => song.id).toList();
+    queue.add(items);
+  }
+
+  List<SongEntity> _queueForMediaSession(PlaybackSnapshot snap) {
+    if (!player.roamActive || snap.queue.isEmpty) {
+      _roamQueueAnchorId = null;
+      _stableRoamQueue = null;
+      return snap.queue;
+    }
+    final anchorId = snap.queue.first.id;
+    if (_roamQueueAnchorId != anchorId || _stableRoamQueue == null) {
+      _roamQueueAnchorId = anchorId;
+      _stableRoamQueue = List<SongEntity>.unmodifiable(snap.queue.take(2));
+    }
+    return _stableRoamQueue!;
+  }
+
+  void _syncMediaItem() {
+    final current = player.snapshot.value.song;
+    // 封面解析中：等 _publishWithLocalArt 拿到本地封面（content://，原生侧
+    // 会内嵌 ALBUM_ART Bitmap）再发布。此刻若发布，artUri 是远程 URL、
+    // Metadata 无 Bitmap，HyperOS 妙播卡片一旦以无封面渲染就不再刷新。
+    if (current != null &&
+        current.coverId != null &&
+        current.coverId!.isNotEmpty &&
+        io.Platform.isAndroid &&
+        _coverResolving) {
+      return;
+    }
+    final item = current != null
+        ? _itemFromSong(current, current: true)
+        : null;
+    // itemKey 必须包含车载歌词行：当「通知显示歌词」关闭时，title/artist/
+    // displaySubtitle 不含歌词，连续歌词行会产生相同 itemKey 被去重吞掉，
+    // 导致车机收不到歌词更新。
+    final itemKey = item == null
+        ? 'none'
+        : [
+            item.id,
+            item.title,
+            item.artist ?? '',
+            item.displayTitle ?? '',
+            item.displaySubtitle ?? '',
+            item.artUri?.toString() ?? '',
+            item.extras?['android.media.metadata.LYRICS'] ?? '',
+          ].join('|');
+    if (itemKey == _lastMediaItemKey) return;
+    _lastMediaItemKey = itemKey;
+    mediaItem.add(item);
+  }
+
+  void _syncPlaybackState(PlaybackSnapshot snap) {
+    final next = _stateFromSnap(snap);
+    final stateKey = [
+      snap.song?.id ?? '',
+      snap.index,
+      snap.isPlaying,
+      next.processingState.name,
+      snap.position.inMilliseconds,
+      snap.bufferedPosition.inMilliseconds,
+      snap.duration?.inMilliseconds ?? -1,
+      player.speed.value,
+      _isFavorite,
+      MediaNotificationSettings.showLyrics.value,
+      MediaNotificationSettings.lyricOnTop.value,
+      MediaNotificationSettings.showCloseAction.value,
+      MediaNotificationSettings.showFavoriteAction.value,
+      _supportsCustomActions,
+    ].join('|');
+    if (stateKey == _lastPlaybackStateKey) return;
+    _lastPlaybackStateKey = stateKey;
+    playbackState.add(next);
+  }
+
+  void _onLyricLineChanged() {
+    _currentLyricLine = LyricsService.instance.currentLineText.value;
+    _syncMediaItem();
+  }
+
+  void _onNotificationSettingsChanged() {
+    if (!MediaNotificationSettings.showLyrics.value) {
+      _currentLyricLine = null;
+    } else {
+      _currentLyricLine = LyricsService.instance.currentLineText.value;
+    }
+    _syncMediaItem();
+    playbackState.add(_stateFromSnap(player.snapshot.value));
+  }
+
+  void _refreshFavoriteState() {
+    final song = player.snapshot.value.song;
+    if (song == null) return;
+    // 从服务器查询收藏状态
+    FeiNiuFavoriteService.instance.isFavorite(song.id).then((fav) {
+      _updateFavorite(fav);
+    });
+  }
+
+  void _updateFavorite(bool value) {
+    if (_isFavorite == value) return;
+    _isFavorite = value;
+    _debugLog('favorite state changed: $_isFavorite');
+    playbackState.add(_stateFromSnap(player.snapshot.value));
+  }
+
+  // ---- 通知按钮回调 ----
+
+  @override
+  Future<void> skipToNext() {
+    _debugLog('skipToNext action');
+    return player.next();
+  }
+
+  @override
+  Future<void> skipToPrevious() {
+    _debugLog('skipToPrevious action');
+    return player.previous();
+  }
+
+  @override
+  Future<void> seek(Duration position) {
+    _debugLog('seek action ${position.inMilliseconds}ms');
+    return player.seek(position);
+  }
+
+  @override
+  Future<void> skipToQueueItem(int index) {
+    _debugLog('skipToQueueItem action index=$index');
+    // Android Auto / 系统媒体中心的队列列表点选曲目时调用，
+    // 必须真正跳到对应索引（原实现恒为 next()，点队列无效）。
+    return player.skipToIndex(index);
+  }
+
+  @override
+  Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
+    _debugLog('customAction name=$name');
+    if (name == _actionCloseApp) {
+      _debugLog('close action');
+      await stop();
+      return;
+    }
+    if (name == _actionFavorite) {
+      final song = player.snapshot.value.song;
+      if (song == null) return;
+      if (_isFavorite) {
+        _debugLog('favorite remove action song=${song.title}');
+        try {
+          await FeiNiuFavoriteService.instance.unfavorite(song.id);
+          _updateFavorite(false);
+        } catch (e) {
+          _debugLog('unfavorite failed: $e');
+        }
+      } else {
+        _debugLog('favorite add action song=${song.title}');
+        try {
+          await FeiNiuFavoriteService.instance.favorite(song.id);
+          _updateFavorite(true);
+        } catch (e) {
+          _debugLog('favorite failed: $e');
+        }
+      }
+      return;
+    }
+    return super.customAction(name, extras);
+  }
+
+  @override
+  Future<void> play() {
+    _debugLog('play action');
+    return player.play();
+  }
+
+  @override
+  Future<void> pause() {
+    _debugLog('pause action');
+    return player.pause();
+  }
+
+  @override
+  Future<void> stop() {
+    _debugLog('stop action');
+    return player.stopAndClear();
+  }
+}
+
+class _CarBrowseSong {
+  const _CarBrowseSong({
+    required this.parentMediaId,
+    required this.mediaItem,
+    required this.queue,
+    required this.index,
+  });
+
+  final String parentMediaId;
+  final MediaItem mediaItem;
+  final List<SongEntity> queue;
+  final int index;
+}
